@@ -1,0 +1,20 @@
+{
+  "name": "KUROKAZE IV — Ink & Steel",
+  "short_name": "KUROKAZE IV",
+  "description": "Kurosawa-inspired 2D samurai dueling game with encrypted Vercel WebSocket multiplayer.",
+  "start_url": "./kurokaze_online.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#060607",
+  "theme_color": "#060607",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23060607'/%3E%3Crect x='18' y='18' width='156' height='156' fill='none' stroke='%23c82424' stroke-width='10'/%3E%3Ctext x='96' y='118' text-anchor='middle' font-family='Georgia,serif' font-weight='bold' font-size='72' fill='%23c82424'%3E%E9%BB%92%E9%A2%A8%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
