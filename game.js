@@ -1,4 +1,4 @@
-/* KUROKAZE IV — Modular Core Engine (v3 — Phase 1 Anti-Spam, Balance & Smart AI)
+/* KUROKAZE IV — Modular Core Engine (v4 — Phase 2: Feints, Kiai, Practice, One-Cut & Rematch Sync)
  * Orchestrates KuroControls, KuroWeapons, KuroFX, KuroRender, and KuroNet.
  */
 (function (global) {
@@ -9,6 +9,8 @@
   const RIGHT_B = 640;
   const GRAV = 2250;
   const BUFFER_SEC = 0.125;
+  const KIAI_COST = 25;
+  const KIAI_CD = 3.5;
   const BEST_KEY = 'kurokaze_iv_best_v1';
 
   const DEFAULT_BALANCE = {
@@ -22,6 +24,13 @@
     overSwingFreeHits: 2,
     overSwingResetSec: 0.72,
     guardBounceStun: 0.14,
+  };
+
+  const EMOTES = {
+    bow:    { jp: '礼', label: 'Respect' },
+    again:  { jp: '再', label: 'One More' },
+    strong: { jp: '強', label: 'Worthy Foe' },
+    blade:  { jp: '剣', label: 'Sharp Blade' },
   };
 
   const getBalance = () => (global.KuroWeapons && KuroWeapons.BALANCE) || DEFAULT_BALANCE;
@@ -53,11 +62,12 @@
     perfMode: 'auto',
   };
 
-  let mode = 'menu';
-  let state = 'MENU';
+  let mode = 'menu'; // menu | story | endless | practice | local2p | online
+  let state = 'MENU'; // MENU | BANNER | STANDOFF | PLAYING | CLASH | ULT | SCROLL | PAUSED | VICTORY | GAMEOVER
   let stageIdx = 2;
   let menuWeaponIdx = 0;
   let selectedStageIdx = 0;
+  let matchRule = 'bo3'; // bo3 | bo5 | onecut
 
   let wave = 0;
   let score = 0;
@@ -72,6 +82,13 @@
   let roundNum = 1;
   let roundEndT = 0;
   let matchEnded = false;
+
+  // Dojo Practice Configuration
+  const practiceCfg = {
+    dummyMode: 'attack', // idle | guard | attack | parry
+    infKi: true,
+    respawnT: 0,
+  };
 
   let tTime = 0;
   let camX = 0;
@@ -93,6 +110,10 @@
     p1Weapon: 0,
     p2Weapon: 0,
     stageIdx: 0,
+    rule: 'bo3',
+    sessionWins: [0, 0],
+    rmReadyHost: false,
+    rmReadyGuest: false,
     localHitSeq: 0,
     pendingHits: new Map(),
     remoteTarget: null,
@@ -110,6 +131,20 @@
     if (settings.perfMode === 'low') return true;
     if (settings.perfMode === 'high') return false;
     return Boolean(global.KuroControls && KuroControls.IS_TOUCH);
+  }
+
+  function normalizeRule(r) {
+    return r === 'bo5' || r === 'onecut' ? r : 'bo3';
+  }
+
+  function winsNeededForRule(r) {
+    return r === 'bo5' || r === 'onecut' ? 3 : 2;
+  }
+
+  function ruleDisplayName(r) {
+    if (r === 'onecut') return 'One-Cut Sudden Death (FT3)';
+    if (r === 'bo5') return 'Best of 5 (FT3)';
+    return 'Best of 3 (FT2)';
   }
 
   function loadBest() {
@@ -197,6 +232,20 @@
     f.buf = makeInputBuffer();
   }
 
+  function emitRematchSync() {
+    if (callbacks.onRematchState) {
+      callbacks.onRematchState({
+        p1Weapon: netState.p1Weapon,
+        p2Weapon: netState.p2Weapon,
+        rule: netState.rule,
+        rmReadyHost: netState.rmReadyHost,
+        rmReadyGuest: netState.rmReadyGuest,
+        sessionWins: netState.sessionWins.slice(),
+        role: netState.role,
+      });
+    }
+  }
+
   /* ==================== FIGHTER FACTORY ==================== */
   let nextFid = 1;
   function makeFighter(cfg) {
@@ -240,6 +289,10 @@
       didBlocked: false,
       lungeApplied: false,
       finisherLockT: 0,
+      feintCd: 0,
+      kiaiCd: 0,
+      kiaiRequested: false,
+      lastHitAt: -10,
       swingChain: 0,
       swingChainT: 0,
       hurtChain: 0,
@@ -270,7 +323,6 @@
       delays: [],
       buf: makeInputBuffer(),
       phase: 1,
-      // Smart AI memory
       aiCd: rand(0.4, 0.9),
       aiSpecial: rand(1.6, 2.8),
       aiKind: 'slash',
@@ -305,9 +357,9 @@
     if (!atk) return;
     const W = KuroWeapons.get(atk.weaponIdx);
     const pMul = atk.perks.has('swift') ? 1.4 : 1;
-    const fMul = atk.team === 1 && (mode === 'story' || mode === 'endless') ? flowKiMul() : 1;
+    const fMul = atk.team === 1 && (mode === 'story' || mode === 'endless' || mode === 'practice') ? flowKiMul() : 1;
     atk.ki = clamp(atk.ki + kiBase * W.kiMul * pMul * fMul, 0, atk.maxKi);
-    if (atk.team === 1 && (mode === 'story' || mode === 'endless')) {
+    if (atk.team === 1 && (mode === 'story' || mode === 'endless' || mode === 'practice')) {
       combo++;
       flow = Math.min(200, flow + 11);
       flowT = 3.6;
@@ -326,7 +378,6 @@
     atk.didBlocked = true;
     atk.pos = Math.min(atk.maxPos, atk.pos + recoilPos);
     atk.vx = dirFromDefender * 165;
-    // Slight blade bounce slows attacker recovery so defender gets a clean turn
     if (atk.act === 'attack' || atk.act === 'airSlash') {
       atk.actT = Math.max(atk.actT, B.guardBounceStun);
     }
@@ -362,13 +413,73 @@
     return W.combo[idx] || W.combo[0];
   }
 
+  /* ==================== KIAI ESCAPE BURST (25 KI) ==================== */
+  function triggerKiaiBurst(f) {
+    if (!f || f.dead || f.ki < KIAI_COST || f.kiaiCd > 0) return false;
+    if (f.act === 'ult' || f.act === 'stagger' || f.act === 'clash') return false;
+
+    f.ki = Math.max(0, f.ki - KIAI_COST);
+    f.kiaiCd = KIAI_CD;
+    f.kiaiRequested = false;
+    f.act = 'idle';
+    f.actT = 0;
+    f.activeMove = null;
+    f.guarding = false;
+    f.guardRecoilT = 0;
+    f.sheathed = false;
+    f.invuln = 0.26;
+    f.hurtChain = 0;
+    f.swingChain = 0;
+    f.finisherLockT = 0;
+    f.vx = 0;
+    clearBuffer(f);
+
+    const hy = f.y - 52 * f.scale;
+    emitEvent({ k: 'ring', x: f.x, y: hy, mr: 205, c: '#f2eee5', lw: 7, sfx: 'taiko', shake: 12, vibe: 28 });
+    emitEvent({ k: 'ring', x: f.x, y: hy, mr: 135, c: '#e03131', lw: 4 });
+    emitEvent({ k: 'txt', x: f.x, y: f.y - 122, txt: 'KIAI 気合', c: '#f2eee5', sc: 1.2 });
+    KuroFX.spawnLandDust(f.x, 1.35, 0);
+
+    // Push back all nearby opponents (zero damage, clean spacing reset)
+    fighters.forEach((o) => {
+      if (o.team !== f.team && !o.dead && Math.abs(o.x - f.x) < 215 && Math.abs(o.y - f.y) < 120) {
+        if (!o.isRemote) {
+          applyKiaiKnockback(o, f.x);
+        }
+      }
+    });
+
+    if (netState.active && !f.isRemote) {
+      KuroNet.sendReliable(['kiai', Math.round(f.x), Math.round(f.y)]);
+      sendMyNetState(true);
+    }
+    return true;
+  }
+
+  function applyKiaiKnockback(target, sourceX) {
+    if (!target || target.dead) return;
+    const dir = target.x >= sourceX ? 1 : -1;
+    target.vx = dir * 560;
+    target.vy = Math.min(target.vy, -140);
+    target.ground = false;
+    target.guarding = false;
+    target.swingChain = 0;
+    if (target.act === 'attack' || target.act === 'airSlash' || target.act === 'windup') {
+      target.act = 'hurt';
+      target.actT = target.actD = 0.22;
+      target.activeMove = null;
+    }
+    KuroFX.spawnLandDust(target.x, 0.9, -dir);
+  }
+
   /* ==================== PRE-FINAL-BLOW SLOW MOTION ==================== */
   function checkKillAnticipation(attacker, move) {
     if (mode === 'online' || killSlowCd > 0 || !move || attacker.role !== 'player') return;
     const foes = fighters.filter((o) => o.team !== attacker.team && !o.dead);
     if (foes.length !== 1) return;
     const tgt = foes[0];
-    if (mode === 'local2p' && rounds[attacker.team === 1 ? 0 : 1] < 1) return;
+    const needed = winsNeededForRule(matchRule);
+    if (mode === 'local2p' && rounds[attacker.team === 1 ? 0 : 1] < needed - 1) return;
 
     const reach = (move.reach || 115) + 48;
     const dx = (tgt.x - attacker.x) * attacker.f;
@@ -509,15 +620,16 @@
       const win = fighters[winnerSide === 1 ? 0 : 1];
       const lose = fighters[winnerSide === 1 ? 1 : 0];
       const dir = sgn(lose.x - win.x);
-      win.ki = clamp(win.ki + 20, 0, win.maxKi);
-      win.x = clamp(lose.x - dir * 86, LEFT_B + 50, RIGHT_B - 50);
+      const isOneCut = (mode === 'online' || mode === 'local2p') && matchRule === 'onecut';
+      win.ki = clamp(win.ki + (isOneCut ? 30 : 20), 0, win.maxKi);
+      win.x = clamp(lose.x - dir * 88, LEFT_B + 50, RIGHT_B - 50);
       win.f = dir;
       win.scarf.reset(win.x, win.y - 78);
       emitEvent({ k: 'cut', x1: win.x - 140, y1: GROUND - 55, x2: lose.x + 140, y2: GROUND - 55, c: '#f2eee5', w: 14, l: 0.45, sfx: 'heavy', inv: 0.08, shake: 14 }, false);
-      KuroFX.applyEvent({ k: 'txt', x: win.x, y: win.y - 125, txt: 'FIRST DRAW! +20 KI', c: '#e03131', sc: 1.25 });
+      KuroFX.applyEvent({ k: 'txt', x: win.x, y: win.y - 125, txt: isOneCut ? 'FIRST DRAW! +30 KI' : 'FIRST DRAW! +20 KI', c: '#e03131', sc: 1.25 });
       if (!lose.isRemote) {
-        lose.pos = Math.min(lose.maxPos - 1, lose.pos + 24);
-        lose.hp = Math.max(1, lose.hp - 12);
+        lose.pos = Math.min(lose.maxPos - 1, lose.pos + (isOneCut ? 48 : 24));
+        if (!isOneCut) lose.hp = Math.max(1, lose.hp - 12);
         lose.act = 'hurt';
         lose.actT = lose.actD = 0.24;
         lose.vx = dir * 240;
@@ -575,6 +687,7 @@
     }
 
     const B = getBalance();
+    const isOneCut = (mode === 'online' || mode === 'local2p') && matchRule === 'onecut';
     const {
       heavy = false,
       unblockable = false,
@@ -589,31 +702,34 @@
     } = opts;
     const hy = def.y - 54 * def.scale;
 
-    // Crimson Execution on Posture-Broken target (rebalanced for Duels vs Solo mobs)
+    // Crimson Execution on Posture-Broken target
     if ((def.execMark || opts.forceExec) && !isProj) {
       def.execMark = false;
       def.stagT = 0;
       def.pos = 0;
       def.hurtChain = 0;
+      def.lastHitAt = tTime;
       const exD =
-        def.role === 'player'
-          ? B.duelExecDmg
-          : def.role === 'boss'
-            ? B.bossExecDmg
-            : Math.round(def.maxHp * B.mobExecRatio);
-      def.hp = Math.max(0, def.hp - exD);
+        isOneCut
+          ? 99
+          : def.role === 'player'
+            ? B.duelExecDmg
+            : def.role === 'boss'
+              ? B.bossExecDmg
+              : Math.round(def.maxHp * B.mobExecRatio);
+      def.hp = Math.max(mode === 'practice' && def === fighters[0] ? 1 : 0, def.hp - exD);
       def.flashT = 0.2;
       const heal = (def.role === 'player' ? 10 : 15) + (atk && atk.perks.has('drain') ? 12 : 0);
       if (atk && !atk.dead) {
         atk.didCleanHit = true;
         atk.swingChain = 0;
-        atk.hp = Math.min(atk.maxHp, atk.hp + heal);
+        if (!isOneCut) atk.hp = Math.min(atk.maxHp, atk.hp + heal);
         grantHit(atk, 320, 18);
       }
       KuroFX.applyEvent({ k: 'cut', x1: def.x - 135, y1: hy - 72, x2: def.x + 135, y2: hy + 72, c: '#e03131', w: 16, l: 0.55, sfx: 'exec', hitstop: 0.085, inv: 0.12, slow: 0.34, zoom: 1.24, shake: 20, vibe: 45 });
       KuroFX.applyEvent({ k: 'ink', x: def.x, y: hy, dir, n: 24, big: true });
-      KuroFX.applyEvent({ k: 'txt', x: def.x, y: hy - 55, txt: `EXECUTION -${exD}`, c: '#e03131', sc: 1.35 });
-      if (atk) KuroFX.applyEvent({ k: 'txt', x: atk.x, y: atk.y - 115, txt: `+${heal} HP`, c: '#f2eee5', sc: 0.95 });
+      KuroFX.applyEvent({ k: 'txt', x: def.x, y: hy - 55, txt: isOneCut ? 'EXECUTION 殺' : `EXECUTION -${exD}`, c: '#e03131', sc: 1.35 });
+      if (atk && !isOneCut) KuroFX.applyEvent({ k: 'txt', x: atk.x, y: atk.y - 115, txt: `+${heal} HP`, c: '#f2eee5', sc: 0.95 });
       if (def.hp <= 0) killFighter(def, atk, dir, 'waist');
       else {
         def.act = 'hurt';
@@ -668,18 +784,18 @@
       return { outcome: 'parry' };
     }
 
-    // Standard Guard: blocks spam, deals guard bounce & posture fatigue back to attacker!
+    // Standard Guard (0 chip in One-Cut mode so blocking saves your life!)
     const facingAttacker = def.f === -dir || (atk && sgn(atk.x - def.x) === def.f);
     if (def.guarding && facingAttacker && !unblockable) {
       def.guardRecoilT = heavy || guardCrush ? 0.22 : 0.14;
+      def.lastHitAt = tTime;
       def.aiGuardHits = (def.aiGuardHits || 0) + 1;
       def.pos = Math.min(def.maxPos, def.pos + Math.round(posDmg * (guardCrush ? 1.35 : 0.55)));
-      const chip = Math.max(1, Math.round(dmg * 0.16));
-      def.hp = Math.max(0, def.hp - chip);
+      const chip = isOneCut ? 0 : Math.max(1, Math.round(dmg * 0.16));
+      def.hp = Math.max(mode === 'practice' && def === fighters[0] ? 1 : 0, def.hp - chip);
       def.vx = dir * (kb ? Math.max(150, kb * 0.65) : 190);
       def.ki = clamp(def.ki + 6, 0, def.maxKi);
 
-      // Attacker does NOT get a fast hit-cancel on guard; instead takes blade bounce & posture fatigue
       let bounced = false;
       if (atk && !isProj && !guardCrush) {
         applyGuardBounce(atk, -dir);
@@ -693,7 +809,7 @@
         breakPosture(def, dir);
         broken = true;
       } else {
-        KuroFX.applyEvent({ k: 'txt', x: def.x, y: def.y - 105, txt: `GUARD -${chip}`, c: '#9a968e', sc: 0.85 });
+        KuroFX.applyEvent({ k: 'txt', x: def.x, y: def.y - 105, txt: chip > 0 ? `GUARD -${chip}` : 'BLOCKED', c: '#9a968e', sc: 0.85 });
       }
       if (def.hp <= 0) killFighter(def, atk, dir, 'arm');
       return { outcome: 'guard', broken, dead: def.dead, bounced: bounced || (!isProj && !guardCrush) };
@@ -707,23 +823,23 @@
     const dmgMul = (def.stagT > 0 ? 1.65 : isCounter ? 1.2 : 1.0) * dmgScale;
     const posMul = (isCounter ? 1.35 : 1.0) * posScale;
 
-    const finD = Math.max(2, Math.round(dmg * dmgMul));
+    const finD = isOneCut ? 1 : Math.max(2, Math.round(dmg * dmgMul));
     const finPos = Math.max(3, Math.round(posDmg * posMul));
 
-    def.hp = Math.max(0, def.hp - finD);
+    def.hp = Math.max(mode === 'practice' && def === fighters[0] ? 1 : 0, def.hp - finD);
     def.pos = Math.min(def.maxPos, def.pos + finPos);
     def.flashT = isCounter ? 0.19 : 0.14;
+    def.lastHitAt = tTime;
     def.hurtChain = Math.min(6, (def.hurtChain || 0) + 1);
     def.hurtChainT = 0.95;
     def.finisherLockT = 0;
 
-    // Smart AI tracks consecutive hits taken so Ronin/Boss react with Guard/Parry
     if (def.role !== 'player') {
       def.aiHitsTaken = (def.aiHitsTaken || 0) + 1;
       def.aiHitsResetT = 1.4;
     }
 
-    if (bleed > 0) {
+    if (bleed > 0 && !isOneCut) {
       def.bleedT = Math.min(4.5, def.bleedT + 2.2);
       def.bleedAtk = atk;
     }
@@ -731,7 +847,7 @@
       atk.didCleanHit = true;
       grantHit(atk, (heavy ? 120 : 65) * (isCounter ? 1.35 : 1), grantKi ? (heavy ? 11 : 6) + (isCounter ? 5 : 0) : 0);
     }
-    if (def.team === 1 && (mode === 'story' || mode === 'endless')) {
+    if (def.team === 1 && (mode === 'story' || mode === 'endless' || mode === 'practice')) {
       combo = 0;
       flow = Math.max(0, flow - 40);
     }
@@ -759,9 +875,9 @@
       k: 'txt',
       x: def.x + rand(-14, 14),
       y: hy - 34,
-      txt: `-${finD}${def.stagT > 0 || isCounter ? '!' : ''}`,
-      c: heavy || unblockable || def.stagT > 0 || isCounter ? '#e03131' : '#f2eee5',
-      sc: heavy || def.stagT > 0 || isCounter ? 1.22 : 0.95,
+      txt: isOneCut ? 'FATAL CUT!' : `-${finD}${def.stagT > 0 || isCounter ? '!' : ''}`,
+      c: isOneCut || heavy || unblockable || def.stagT > 0 || isCounter ? '#e03131' : '#f2eee5',
+      sc: isOneCut || heavy || def.stagT > 0 || isCounter ? 1.22 : 0.95,
     });
 
     if (def.hp <= 0) {
@@ -796,7 +912,6 @@
 
     if (!armor) {
       def.act = 'hurt';
-      // Shorter hitstun on high combo chains so defenders can guard/parry/dash out
       const stunScale = Math.max(0.7, 1 - chainIdx * 0.08);
       def.actT = def.actD = (isCounter ? 0.34 : heavy ? 0.28 : 0.2) * stunScale;
       const pushScale = 1 + chainIdx * 0.14;
@@ -854,6 +969,11 @@
     };
     emitEvent(severEv, mode === 'online');
     emitEvent({ k: 'ring', x: f.x, y: f.y - 54, mr: 145, c: '#e03131', lw: 6, sfx: 'taiko', inv: 0.12, slow: 0.45, slowScale: 0.24, zoom: 1.18, shake: 19 }, mode === 'online');
+
+    if (mode === 'practice' && f.team === 2) {
+      practiceCfg.respawnT = 1.4;
+      return;
+    }
 
     if (mode === 'online' && !netState.koSent) {
       netState.koSent = true;
@@ -1182,7 +1302,7 @@
     }
   }
 
-  /* ==================== FIGHTER STEP (ANTI-SPAM + BUFFERED) ==================== */
+  /* ==================== FIGHTER STEP (FEINTS + KIAI + ANTI-SPAM) ==================== */
   function stepFighter(f, inp, dt) {
     if (f.dead) {
       f.deadT -= dt;
@@ -1203,7 +1323,14 @@
     // Timers
     if (f.role === 'player') {
       const calmBonus = f.sheathed ? 4.2 : 0;
-      f.ki = clamp(f.ki + (2.6 * swift + calmBonus) * dt, 0, f.maxKi);
+      const practiceKiBonus = mode === 'practice' && practiceCfg.infKi ? 45 : 0;
+      f.ki = clamp(f.ki + (2.6 * swift + calmBonus + practiceKiBonus) * dt, 0, f.maxKi);
+    }
+
+    // Dojo Practice auto-regen after 1.5s without taking damage
+    if (mode === 'practice' && tTime - f.lastHitAt > 1.5) {
+      if (f.hp < f.maxHp) f.hp = Math.min(f.maxHp, f.hp + 60 * dt);
+      if (f.pos > 0 && f.stagT <= 0) f.pos = Math.max(0, f.pos - 40 * dt);
     }
 
     if (f.bleedT > 0) {
@@ -1211,7 +1338,7 @@
       f.bleedTick += dt;
       if (f.bleedTick >= 0.45) {
         f.bleedTick = 0;
-        f.hp = Math.max(0, f.hp - 2);
+        f.hp = Math.max(mode === 'practice' && f === fighters[0] ? 1 : 0, f.hp - 2);
         KuroFX.applyEvent({ k: 'ink', x: f.x, y: f.y - 54, dir: 0, n: 3, big: false });
         if (f.hp <= 0) {
           killFighter(f, f.bleedAtk, -f.f, 'arm');
@@ -1227,8 +1354,11 @@
     if (f.invuln > 0) f.invuln -= dt;
     if (f.parryW > 0) f.parryW -= dt;
     if (f.flashT > 0) f.flashT -= dt;
+    if (f.feintCd > 0) f.feintCd = Math.max(0, f.feintCd - dt);
+    if (f.kiaiCd > 0) f.kiaiCd = Math.max(0, f.kiaiCd - dt);
     if (f.guardRecoilT > 0) f.guardRecoilT = Math.max(0, f.guardRecoilT - dt);
-    if (f.landSquash > 0) f.landSquash = Math.max(0, f.landSquash - dt * 5.8);
+    if (f.landSquash > 0) f.landSquash = Math.max(0, f.landSquash - dt);
+    if (f.landSquash > 0) f.landSquash = Math.max(0, f.landSquash - dt * 4.8);
     if (f.finisherLockT > 0) f.finisherLockT = Math.max(0, f.finisherLockT - dt);
     if (f.swingChainT > 0 && (f.swingChainT -= dt) <= 0) f.swingChain = 0;
     if (f.hurtChainT > 0 && (f.hurtChainT -= dt) <= 0) f.hurtChain = 0;
@@ -1248,12 +1378,38 @@
       }
     }
 
-    // Strict Anti-Spam Cancel Rules:
-    // - Whiffing or hitting a Guard gives ZERO fast hit-cancel (must finish recovery!)
-    // - Landing a clean hit lets you cancel recovery into Dash, Parry, or next non-finisher combo step
+    // Kiai 25-Ki Emergency Escape Burst (works even while hurt-stunned or guarding!)
+    if (f.role === 'player') {
+      const wantsKiai = f.kiaiRequested || (inp.guard && b.dash > 0) || (b.parry > 0 && b.dash > 0);
+      if (wantsKiai) {
+        f.kiaiRequested = false;
+        if (triggerKiaiBurst(f)) {
+          updatePoseAndScarf(f, dt);
+          return;
+        }
+      }
+    }
+
     const inAtk = f.act === 'attack' || f.act === 'airSlash';
     const curMv = f.activeMove;
     const atkPrg = inAtk ? 1 - f.actT / Math.max(0.01, f.actD) : 0;
+
+    // Feint Cancel: tap Guard during startup windup (before blade whips) to stop cold & bait enemy Parry
+    if (f.role === 'player' && f.act === 'attack' && !f.lungeApplied && b.parry > 0 && f.feintCd <= 0) {
+      b.parry = 0;
+      f.act = 'idle';
+      f.actT = 0;
+      f.activeMove = null;
+      f.feintCd = 0.45;
+      f.vx *= 0.2;
+      f.swingChain = Math.max(0, (f.swingChain || 1) - 1);
+      f._trail = [];
+      f._trail2 = [];
+      KuroFX.spawnLandDust(f.x, 0.55, -f.f);
+      emitEvent({ k: 'txt', x: f.x, y: f.y - 108, txt: 'FEINT', c: '#b8b3a8', sc: 0.9, sfx: 'hover' });
+      if (netState.active && !f.isRemote) sendMyNetState(true);
+    }
+
     const cancelGate = curMv && curMv.cancelAt !== undefined ? curMv.cancelAt : 0.58;
     const canDefCancel = inAtk && f.didCleanHit && atkPrg >= cancelGate;
     const canChainCombo = inAtk && f.didCleanHit && !(curMv && curMv.isFinisher) && atkPrg >= cancelGate;
@@ -1292,7 +1448,7 @@
       }
     }
 
-    // Flash-Step Dash (allowed out of neutral OR clean hit-cancel; resets finisher lock)
+    // Flash-Step Dash
     if (!busyForUtility && b.dash > 0 && f.dashCd <= 0) {
       b.dash = 0;
       const dir = inp.l ? -1 : inp.r ? 1 : f.f;
@@ -1318,7 +1474,7 @@
       }
     }
 
-    // Perfect Parry (allowed out of neutral OR clean hit-cancel on ground)
+    // Perfect Parry
     const canParryNow = f.ground && !hardBusy && (f.act === 'idle' || f.act === 'run' || f.act === 'guard' || canDefCancel);
     if (b.parry > 0 && canParryNow) {
       b.parry = 0;
@@ -1330,7 +1486,7 @@
       f.actT = 0;
     }
 
-    // Weapon Combos + Directional Up/Down + Unique Air Attacks (Respecting Finisher End-Lock & Over-Swing Fatigue)
+    // Weapon Combos + Directional Up/Down + Unique Air Attacks
     const canStartAtk = !hardBusy && f.act !== 'dash' && f.finisherLockT <= 0 && (!inAtk || canChainCombo);
     if (b.atk > 0 && canStartAtk) {
       b.atk = 0;
@@ -1344,7 +1500,6 @@
       f.lungeApplied = false;
       f.unblockable = false;
 
-      // Over-Swing Fatigue: mashing >2 swings without a breath builds self-posture
       if (f.role === 'player') {
         f.swingChain = (f.swingChain || 0) + 1;
         f.swingChainT = B.overSwingResetSec;
@@ -1392,7 +1547,7 @@
       }
     }
 
-    // Jump & Double Jump (Buffered)
+    // Jump & Double Jump
     if (!busyForUtility && b.jump > 0) {
       if (f.ground || f.coyote > 0) {
         b.jump = 0;
@@ -1516,7 +1671,6 @@
         if (f.act === 'windup') {
           triggerEnemyStrike(f);
         } else {
-          // Apply real end-of-combo finisher pause so players can't loop Hit 1 infinitely
           if (f.act === 'attack' && f.activeMove && f.activeMove.isFinisher) {
             f.finisherLockT = W.finisherRecovery || 0.28;
             f.step = 0;
@@ -1700,7 +1854,7 @@
     f.hpLag = lerp(f.hpLag, f.hp, clamp(dt * 7, 0, 1));
   }
 
-  /* ==================== SMART ANTI-SPAM ENEMY AI ==================== */
+  /* ==================== SMART AI & DOJO PRACTICE DUMMY ==================== */
   function triggerEnemyStrike(e) {
     e.hitSet.clear();
     e.didCleanHit = false;
@@ -1753,10 +1907,63 @@
       KuroFX.applyEvent({ k: 'ring', x: e.x + e.f * 75, y: GROUND, mr: 125, c: '#e03131', lw: 5, shake: 11 });
       KuroFX.spawnBladeScrape(e.x + e.f * 75, e.f);
     }
-    e.aiCd = e.role === 'boss' ? (e.phase === 2 ? 0.5 : 0.78) : rand(0.75, 1.35);
+    e.aiCd = mode === 'practice' ? 1.15 : e.role === 'boss' ? (e.phase === 2 ? 0.5 : 0.78) : rand(0.75, 1.35);
+  }
+
+  function computePracticeDummy(e, dt) {
+    const inp = { l: false, r: false, up: false, down: false, jump: false, atk: false, guard: false, parryTap: false, dash: false, q: false, e: false, rSkill: false, taunt: false };
+    const tgt = fighters[0];
+    if (!tgt || e.dead) return inp;
+    if (e.aiCd > 0) e.aiCd -= dt;
+    if (e.aiGuardCd > 0) e.aiGuardCd -= dt;
+
+    if (e.act === 'hurt' || e.act === 'stagger' || e.act === 'attack' || e.act === 'dash' || e.act === 'parry') return inp;
+
+    const dx = tgt.x - e.x;
+    const dist = Math.abs(dx);
+    const dir = dx >= 0 ? 1 : -1;
+    e.f = dir;
+
+    if (e.act === 'windup') return inp;
+
+    const dm = practiceCfg.dummyMode;
+    if (dm === 'idle') return inp;
+
+    if (dm === 'guard') {
+      inp.guard = true;
+      return inp;
+    }
+
+    if (dm === 'parry') {
+      // Attempts to parry incoming swings — ideal for testing Feint baits!
+      const playerWindup = tgt.act === 'attack' && !tgt.lungeApplied && dist < 175;
+      if (playerWindup && e.aiGuardCd <= 0) {
+        e.aiGuardCd = 1.1;
+        inp.parryTap = true;
+        inp.guard = true;
+        return inp;
+      }
+      if (dist < 150) inp.guard = true;
+      return inp;
+    }
+
+    // 'attack': walks into range and swings steadily (occasional red heavy) for Parry/Counter drills
+    if (dist > 110) {
+      if (dir > 0) inp.r = true;
+      else inp.l = true;
+    } else if (e.aiCd <= 0) {
+      e.act = 'windup';
+      e.unblockable = Math.random() < 0.25;
+      e.aiKind = e.unblockable ? 'slam' : 'slash';
+      e.actD = e.actT = e.unblockable ? 0.62 : 0.46;
+      KuroFX.SFX.play('glint');
+    }
+    return inp;
   }
 
   function computeAI(e, dt) {
+    if (mode === 'practice') return computePracticeDummy(e, dt);
+
     const inp = { l: false, r: false, up: false, down: false, jump: false, atk: false, guard: false, parryTap: false, dash: false, q: false, e: false, rSkill: false, taunt: false };
     const tgt = fighters.find((f) => f.team === 1 && !f.dead);
     if (!tgt || e.dead) return inp;
@@ -1781,12 +1988,10 @@
       return inp;
     }
 
-    // Active Guard Hold & Spam-Punish Perfect Parry (Ronin & Lord Kurogane)
     if (e.aiGuardT > 0) {
       e.aiGuardT -= dt;
       e.f = dir;
       inp.guard = true;
-      // If player keeps mashing into AI guard, punish with a Perfect Parry!
       if (playerAttacking && dist < 155 && e.aiGuardHits >= (e.role === 'boss' ? 1 : 2)) {
         e.aiGuardHits = 0;
         e.aiGuardT = 0;
@@ -1796,7 +2001,6 @@
       return inp;
     }
 
-    // Trigger Defensive Guard after taking 2 hits or spotting reckless close spam
     const canDefend = (e.role === 'ronin' || e.role === 'boss') && e.ground && e.aiGuardCd <= 0 && e.pos < e.maxPos * 0.72;
     if (canDefend && dist < 155 && (e.aiHitsTaken >= 2 || (playerAttacking && Math.random() < (e.role === 'boss' ? 0.35 : 0.16)))) {
       e.f = dir;
@@ -1809,7 +2013,6 @@
       return inp;
     }
 
-    // Yari Spearman back-hop when crowded so they control polearm spacing
     if (e.role === 'spearman' && e.ground && dist < 112 && e.aiBackhopCd <= 0) {
       e.f = dir;
       e.aiBackhopCd = 2.0;
@@ -1822,7 +2025,6 @@
       return inp;
     }
 
-    // Anti-clump spacing between multiple enemies
     fighters.forEach((o) => {
       if (o !== e && o.team === e.team && !o.dead && Math.abs(e.x - o.x) < 68) {
         e.x += sgn(e.x - o.x) * 105 * dt;
@@ -1854,7 +2056,6 @@
       }
     }
 
-    // Coordinated flanking when 2+ melee foes are alive
     const aliveFoes = fighters.filter((o) => o.team === 2 && !o.dead).length;
     const pref = e.role === 'spearman' ? 165 : e.role === 'brute' || e.role === 'boss' ? 124 : 96;
     const goalX = aliveFoes >= 2 ? clamp(tgt.x + e.flankSide * pref, LEFT_B + 70, RIGHT_B - 70) : tgt.x - dir * pref;
@@ -1986,11 +2187,18 @@
   function applyOnlineRoundEnd(w1, w2, winnerSide) {
     rounds[0] = w1;
     rounds[1] = w2;
+    const needed = winsNeededForRule(netState.rule);
     const iWonRound = (netState.role === 'host' && winnerSide === 1) || (netState.role === 'guest' && winnerSide === 2);
-    if (rounds[0] >= 2 || rounds[1] >= 2) {
+
+    if (rounds[0] >= needed || rounds[1] >= needed) {
       matchEnded = true;
       state = 'VICTORY';
-      const iWonMatch = (netState.role === 'host' && rounds[0] >= 2) || (netState.role === 'guest' && rounds[1] >= 2);
+      netState.rmReadyHost = false;
+      netState.rmReadyGuest = false;
+      if (rounds[0] >= needed) netState.sessionWins[0]++;
+      else netState.sessionWins[1]++;
+
+      const iWonMatch = (netState.role === 'host' && rounds[0] >= needed) || (netState.role === 'guest' && rounds[1] >= needed);
       showBanner(iWonMatch ? '剣聖' : '落花', iWonMatch ? 'VICTORY' : 'DEFEATED', `P1 ${rounds[0]} — ${rounds[1]} P2`, 2.0, false);
       setTimeout(() => {
         if (mode === 'online' && callbacks.onResult) {
@@ -1998,13 +2206,17 @@
             mode: 'online',
             win: iWonMatch,
             title: iWonMatch ? 'DUEL VICTORY' : 'FALLEN IN DUEL',
-            sub: `Best of 3 • P1 ${rounds[0]} — ${rounds[1]} P2`,
+            sub: `${ruleDisplayName(netState.rule)} • P1 ${rounds[0]} — ${rounds[1]} P2`,
             canRematch: true,
             p1Weapon: netState.p1Weapon,
             p2Weapon: netState.p2Weapon,
+            rule: netState.rule,
             role: netState.role,
+            sessionWins: netState.sessionWins.slice(),
+            rmReadyHost: false,
+            rmReadyGuest: false,
             stats: [
-              ['Your Role', netState.role.toUpperCase()],
+              ['Session', `P1 ${netState.sessionWins[0]} — ${netState.sessionWins[1]} P2`],
               ['Rounds', `${rounds[0]} — ${rounds[1]}`],
               ['Ping', `${KuroNet.getState().ping || 0} ms`],
             ],
@@ -2017,6 +2229,19 @@
     }
   }
 
+  function maybeHostLaunchRematch() {
+    if (netState.role !== 'host' || !netState.rmReadyHost || !netState.rmReadyGuest) return;
+    netState.rmReadyHost = false;
+    netState.rmReadyGuest = false;
+    roundNum = 1;
+    rounds = [0, 0];
+    matchEnded = false;
+    matchRule = netState.rule;
+    KuroNet.sendReliable(['rm', netState.p1Weapon, netState.p2Weapon, netState.rule]);
+    setupOnlineRound();
+    if (callbacks.onRematchStarted) callbacks.onRematchStarted();
+  }
+
   function handleNetRelay(payload) {
     if (!Array.isArray(payload) || !payload.length) return;
     const tag = payload[0];
@@ -2025,6 +2250,16 @@
       if (callbacks.onOnlineLobbyMsg) callbacks.onOnlineLobbyMsg(payload);
       return;
     }
+
+    if (tag === 'emote') {
+      const em = EMOTES[payload[2]];
+      if (em) {
+        KuroFX.SFX.play('hover');
+        if (callbacks.onOnlineEmote) callbacks.onOnlineEmote({ fromRole: payload[1], code: payload[2], ...em });
+      }
+      return;
+    }
+
     if (!netState.active || mode !== 'online') return;
     const myF = getMyFighter();
     const opF = getRemoteFighter();
@@ -2058,6 +2293,12 @@
       }
       case 'fx':
         KuroFX.applyEvent(payload[1]);
+        break;
+      case 'kiai':
+        if (myF && !myF.dead && Math.abs(myF.x - payload[1]) < 220 && Math.abs(myF.y - payload[2]) < 125) {
+          applyKiaiKnockback(myF, payload[1]);
+          sendMyNetState(true);
+        }
         break;
       case 'pw': {
         const [, kind, px, py, pf, pvy] = payload;
@@ -2160,7 +2401,6 @@
           KuroFX.applyEvent({ k: 'txt', x: myF.x, y: myF.y - 122, txt: 'PARRIED!', c: '#e03131', sc: 1.25 });
           sendMyNetState(true);
         } else if (outcome === 'guard') {
-          // No fast cancel on guard; apply guard bounce & posture fatigue on online attacker too
           if (bounced && !pend.isProj && !pend.guardCrush) {
             applyGuardBounce(myF, -pend.dir);
             sendMyNetState(true);
@@ -2173,7 +2413,7 @@
           if (pend.grantKi) grantHit(myF, 80, (isEx ? 18 : pend.heavy ? 11 : 6) + (isCounter ? 5 : 0));
           if (isEx) {
             myF.swingChain = 0;
-            myF.hp = Math.min(myF.maxHp, myF.hp + 10);
+            if (netState.rule !== 'onecut') myF.hp = Math.min(myF.maxHp, myF.hp + 10);
             KuroFX.applyEvent({ k: 'cut', x1: pend.fxX - 135, y1: pend.fxY - 72, x2: pend.fxX + 135, y2: pend.fxY + 72, c: '#e03131', w: 16, l: 0.55, sfx: 'exec', hitstop: 0.085, inv: 0.12, slow: 0.3, zoom: 1.22, shake: 20 });
             KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 50, txt: `EXECUTION -${dealt}`, c: '#e03131', sc: 1.3 });
           } else {
@@ -2183,7 +2423,7 @@
               KuroFX.applyEvent({ k: 'sparks', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: pend.heavy ? 14 : 9, redP: 0.45, sfx: pend.heavy ? 'heavyHit' : 'hit', hitstop: pend.heavy ? 0.06 : 0.04, shake: pend.heavy ? 10 : 6 });
             }
             KuroFX.applyEvent({ k: 'ink', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: 12, big: pend.heavy || Boolean(isCounter) });
-            KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 34, txt: `-${dealt}${isCounter ? '!' : ''}`, c: pend.heavy || isCounter ? '#e03131' : '#f2eee5', sc: pend.heavy || isCounter ? 1.18 : 0.95 });
+            KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 34, txt: netState.rule === 'onecut' ? 'FATAL CUT!' : `-${dealt}${isCounter ? '!' : ''}`, c: pend.heavy || isCounter || netState.rule === 'onecut' ? '#e03131' : '#f2eee5', sc: pend.heavy || isCounter ? 1.18 : 0.95 });
           }
           if (broken) KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 70, txt: 'POSTURE BROKEN!', c: '#e03131', sc: 1.2 });
         }
@@ -2202,13 +2442,36 @@
         setupOnlineRound();
         break;
       case 'rm_wep':
-        if (payload[1] === 'host') netState.p1Weapon = clamp(payload[2] || 0, 0, KuroWeapons.WEAPONS.length - 1);
-        else netState.p2Weapon = clamp(payload[2] || 0, 0, KuroWeapons.WEAPONS.length - 1);
-        if (callbacks.onRematchWeaponSync) callbacks.onRematchWeaponSync(netState.p1Weapon, netState.p2Weapon);
+        if (payload[1] === 'host') {
+          netState.p1Weapon = clamp(payload[2] || 0, 0, KuroWeapons.WEAPONS.length - 1);
+          netState.rmReadyHost = false;
+        } else {
+          netState.p2Weapon = clamp(payload[2] || 0, 0, KuroWeapons.WEAPONS.length - 1);
+          netState.rmReadyGuest = false;
+        }
+        emitRematchSync();
+        break;
+      case 'rm_rule':
+        if (payload[1]) {
+          netState.rule = normalizeRule(payload[1]);
+          netState.rmReadyHost = false;
+          netState.rmReadyGuest = false;
+          emitRematchSync();
+        }
+        break;
+      case 'rm_rdy':
+        if (payload[1] === 'host') netState.rmReadyHost = Boolean(payload[2]);
+        else netState.rmReadyGuest = Boolean(payload[2]);
+        emitRematchSync();
+        maybeHostLaunchRematch();
         break;
       case 'rm':
         if (payload[1] !== undefined) netState.p1Weapon = clamp(payload[1], 0, KuroWeapons.WEAPONS.length - 1);
         if (payload[2] !== undefined) netState.p2Weapon = clamp(payload[2], 0, KuroWeapons.WEAPONS.length - 1);
+        if (payload[3]) netState.rule = normalizeRule(payload[3]);
+        matchRule = netState.rule;
+        netState.rmReadyHost = false;
+        netState.rmReadyGuest = false;
         roundNum = 1;
         rounds = [0, 0];
         matchEnded = false;
@@ -2294,6 +2557,18 @@
     if (list.length === 1 && list[0] === 'boss') startStandoff(1.45);
   }
 
+  function spawnPracticeDummy() {
+    const p1 = fighters[0];
+    const spawnX = p1 ? clamp(p1.x + (p1.x > 160 ? -240 : 240), LEFT_B + 110, RIGHT_B - 110) : 220;
+    const dummy = makeEnemy('ronin', spawnX, 1.6, 1);
+    dummy.name = 'SPARRING RONIN';
+    dummy.hp = dummy.maxHp = 150;
+    dummy.hpLag = 150;
+    dummy.maxPos = 90;
+    fighters = [p1, dummy];
+    KuroFX.applyEvent({ k: 'ring', x: spawnX, y: GROUND - 54, mr: 90, c: '#f2eee5', lw: 4, sfx: 'dash' });
+  }
+
   function openScrollPicker() {
     state = 'SCROLL';
     if (mode === 'endless') saveBest(wave + 1, score);
@@ -2329,17 +2604,22 @@
 
   function setupLocal2PRound() {
     const B = getBalance();
+    const startHp = matchRule === 'onecut' ? 1 : B.duelHp;
     resetArena();
     roundEndT = 0;
     fighters = [
-      makeFighter({ id: 1, team: 1, role: 'player', name: 'P1', weaponIdx: menuWeaponIdx, x: -240, f: 1, hp: B.duelHp, scarfCol: '#f2eee5', hat: 'kasa' }),
-      makeFighter({ id: 2, team: 2, role: 'player', name: 'P2', weaponIdx: (menuWeaponIdx + 1) % KuroWeapons.WEAPONS.length, x: 240, f: -1, hp: B.duelHp, scarfCol: '#c82424', hat: 'kabuto' }),
+      makeFighter({ id: 1, team: 1, role: 'player', name: 'P1', weaponIdx: menuWeaponIdx, x: -240, f: 1, hp: startHp, scarfCol: '#f2eee5', hat: 'kasa' }),
+      makeFighter({ id: 2, team: 2, role: 'player', name: 'P2', weaponIdx: (menuWeaponIdx + 1) % KuroWeapons.WEAPONS.length, x: 240, f: -1, hp: startHp, scarfCol: '#c82424', hat: 'kabuto' }),
     ];
-    showBanner(`第${roundNum}戦`, `ROUND ${roundNum}`, `${KuroWeapons.get(fighters[0].weaponIdx).name.toUpperCase()}  VS  ${KuroWeapons.get(fighters[1].weaponIdx).name.toUpperCase()}`, 1.15);
+    const sub = matchRule === 'onecut'
+      ? 'ONE-CUT SUDDEN DEATH — BLOCK OR DIE'
+      : `${KuroWeapons.get(fighters[0].weaponIdx).name.toUpperCase()}  VS  ${KuroWeapons.get(fighters[1].weaponIdx).name.toUpperCase()}`;
+    showBanner(`第${roundNum}戦`, `ROUND ${roundNum}`, sub, 1.15);
   }
 
   function setupOnlineRound() {
     const B = getBalance();
+    const startHp = netState.rule === 'onecut' ? 1 : B.duelHp;
     resetArena();
     netState.pendingHits.clear();
     netState.remoteTarget = null;
@@ -2347,10 +2627,12 @@
     roundEndT = 0;
     stageIdx = netState.stageIdx;
     fighters = [
-      makeFighter({ id: 1, team: 1, role: 'player', name: 'P1', weaponIdx: netState.p1Weapon, x: -240, f: 1, hp: B.duelHp, scarfCol: '#f2eee5', hat: 'kasa', isRemote: netState.role !== 'host' }),
-      makeFighter({ id: 2, team: 2, role: 'player', name: 'P2', weaponIdx: netState.p2Weapon, x: 240, f: -1, hp: B.duelHp, scarfCol: '#c82424', hat: 'kabuto', isRemote: netState.role !== 'guest' }),
+      makeFighter({ id: 1, team: 1, role: 'player', name: 'P1', weaponIdx: netState.p1Weapon, x: -240, f: 1, hp: startHp, scarfCol: '#f2eee5', hat: 'kasa', isRemote: netState.role !== 'host' }),
+      makeFighter({ id: 2, team: 2, role: 'player', name: 'P2', weaponIdx: netState.p2Weapon, x: 240, f: -1, hp: startHp, scarfCol: '#c82424', hat: 'kabuto', isRemote: netState.role !== 'guest' }),
     ];
-    showBanner(`第${roundNum}戦`, `ROUND ${roundNum}`, netState.role === 'host' ? 'YOU ARE P1 (LEFT)' : 'YOU ARE P2 (RIGHT)', 1.15);
+    const roleHint = netState.role === 'host' ? 'YOU ARE P1 (LEFT)' : 'YOU ARE P2 (RIGHT)';
+    const sub = netState.rule === 'onecut' ? `ONE-CUT SUDDEN DEATH • ${roleHint}` : roleHint;
+    showBanner(`第${roundNum}戦`, `ROUND ${roundNum}`, sub, 1.15);
     sendMyNetState(true);
   }
 
@@ -2450,6 +2732,8 @@
         if (mode === 'story' || mode === 'endless') {
           state = 'PLAYING';
           spawnWaveEnemies();
+        } else if (mode === 'practice') {
+          state = 'PLAYING';
         } else if (roundNum === 1) {
           startStandoff(mode === 'online' ? 1.55 : rand(1.1, 1.9));
         } else {
@@ -2527,7 +2811,7 @@
         clash.meter = clamp(clash.meter - 0.18, -1, 1);
         KuroFX.applyEvent({ k: 'sparks', x: clash.x, y: clash.y, dir: 0, n: 6, sfx: 'guard', shake: 4 });
       }
-      if (mode === 'story' || mode === 'endless') {
+      if (mode === 'story' || mode === 'endless' || mode === 'practice') {
         clash.aiPushT -= rdt;
         if (clash.aiPushT <= 0) {
           clash.aiPushT = 0.22;
@@ -2558,7 +2842,6 @@
       return;
     }
 
-    // Buffer human inputs before hitstop so nothing pressed during freeze-frames drops
     const p1Inp = KuroControls.readP1(mode);
     const p2Inp = mode === 'local2p' ? KuroControls.readP2Local() : null;
     const myF = getMyFighter();
@@ -2602,19 +2885,20 @@
       if (fighters[1]) stepFighter(fighters[1], p2Inp, dt);
       const p1 = fighters[0];
       const p2 = fighters[1];
+      const needed = winsNeededForRule(matchRule);
       if ((p1.dead || p2.dead) && (roundEndT += rdt) >= 1.45) {
         if (p2.dead) rounds[0]++;
         else rounds[1]++;
-        if (rounds[0] >= 2 || rounds[1] >= 2) {
+        if (rounds[0] >= needed || rounds[1] >= needed) {
           matchEnded = true;
           state = 'VICTORY';
-          const p1W = rounds[0] >= 2;
+          const p1W = rounds[0] >= needed;
           if (callbacks.onResult) {
             callbacks.onResult({
               mode: 'local2p',
               win: true,
               title: p1W ? 'P1 WINS' : 'P2 WINS',
-              sub: `Best of 3 • P1 ${rounds[0]} — ${rounds[1]} P2`,
+              sub: `${ruleDisplayName(matchRule)} • P1 ${rounds[0]} — ${rounds[1]} P2`,
               canRematch: true,
               stats: [
                 ['P1 Rounds', String(rounds[0])],
@@ -2626,6 +2910,18 @@
           roundNum++;
           setupLocal2PRound();
         }
+      }
+    } else if (mode === 'practice') {
+      if (fighters[0]) stepFighter(fighters[0], p1Inp, dt);
+      if (fighters[1]) {
+        const d = fighters[1];
+        const aiInp = computeAI(d, dt);
+        feedBuffer(d, aiInp, dt);
+        stepFighter(d, aiInp, dt);
+      }
+      if (practiceCfg.respawnT > 0) {
+        practiceCfg.respawnT -= rdt;
+        if (practiceCfg.respawnT <= 0) spawnPracticeDummy();
       }
     } else {
       if (fighters[0]) stepFighter(fighters[0], p1Inp, dt);
@@ -2683,6 +2979,7 @@
           qReady: myF.ki >= sk.q.cost,
           eReady: myF.ki >= sk.e.cost,
           rReady: myF.ki >= sk.r.cost,
+          kiaiReady: myF.ki >= KIAI_COST && myF.kiaiCd <= 0,
           qShort: sk.q.short,
           eShort: sk.e.short,
           rShort: sk.r.short,
@@ -2710,6 +3007,7 @@
 
   /* ==================== PUBLIC API ==================== */
   const KuroGame = {
+    EMOTES,
     get WEAPONS() { return KuroWeapons.WEAPONS; },
     get STAGES() { return KuroWeapons.STAGES; },
     get SCROLLS() { return KuroWeapons.SCROLLS; },
@@ -2755,6 +3053,10 @@
       selectedStageIdx = clamp(idx | 0, 0, KuroWeapons.STAGES.length - 1);
     },
 
+    setMatchRule(rule) {
+      matchRule = normalizeRule(rule);
+    },
+
     updateSettings(patch) {
       Object.assign(settings, patch || {});
       KuroFX.SFX.setVolume(settings.volume);
@@ -2771,6 +3073,7 @@
       const B = getBalance();
       KuroFX.SFX.init();
       mode = 'story';
+      matchRule = 'bo3';
       matchEnded = false;
       netState.active = false;
       wave = 0; score = 0; kills = 0; combo = 0; flow = 0; maxFlow = 'D'; parries = 0; clearDelay = 0;
@@ -2783,6 +3086,7 @@
       const B = getBalance();
       KuroFX.SFX.init();
       mode = 'endless';
+      matchRule = 'bo3';
       matchEnded = false;
       netState.active = false;
       wave = 0; score = 0; kills = 0; combo = 0; flow = 0; maxFlow = 'D'; parries = 0; clearDelay = 0;
@@ -2791,9 +3095,53 @@
       beginSoloWave(0);
     },
 
-    startLocal2P() {
+    startPractice() {
+      const B = getBalance();
+      KuroFX.SFX.init();
+      mode = 'practice';
+      matchRule = 'bo3';
+      matchEnded = false;
+      netState.active = false;
+      stageIdx = selectedStageIdx;
+      practiceCfg.respawnT = 0;
+      wave = 0; score = 0; kills = 0; combo = 0; flow = 0; maxFlow = 'D'; parries = 0;
+      resetArena();
+      fighters = [makeFighter({ id: 1, team: 1, role: 'player', name: 'KUROKAZE', weaponIdx: menuWeaponIdx, x: -180, f: 1, hp: B.soloHp, ki: 100, scarfCol: '#c82424' })];
+      spawnPracticeDummy();
+      if (callbacks.onModeChange) callbacks.onModeChange('practice');
+      showBanner('稽古', 'DOJO PRACTICE', 'Test Feints (Guard during startup), Kiai (Guard+Dash) & All 4 Blades', 1.4);
+    },
+
+    setPracticeConfig(patch) {
+      if (!patch) return;
+      if (patch.dummyMode) practiceCfg.dummyMode = patch.dummyMode;
+      if (patch.infKi !== undefined) practiceCfg.infKi = Boolean(patch.infKi);
+      if (patch.stageIdx !== undefined) {
+        stageIdx = clamp(patch.stageIdx | 0, 0, KuroWeapons.STAGES.length - 1);
+        selectedStageIdx = stageIdx;
+      }
+      if (patch.weaponIdx !== undefined && mode === 'practice' && fighters[0]) {
+        const W = KuroWeapons.get(patch.weaponIdx);
+        menuWeaponIdx = W.index;
+        const p1 = fighters[0];
+        p1.weaponIdx = W.index;
+        p1.weapon = W.id;
+        p1.spd = W.moveSpd || 415;
+        p1.step = 0;
+        p1._trail = [];
+        p1._trail2 = [];
+        KuroFX.SFX.play('sheathe');
+      }
+    },
+
+    getPracticeConfig() {
+      return { ...practiceCfg, stageIdx, weaponIdx: menuWeaponIdx };
+    },
+
+    startLocal2P(rule) {
       KuroFX.SFX.init();
       mode = 'local2p';
+      if (rule) matchRule = normalizeRule(rule);
       matchEnded = false;
       netState.active = false;
       stageIdx = selectedStageIdx;
@@ -2812,31 +3160,71 @@
       netState.p1Weapon = KuroWeapons.indexOf(cfg.p1Weapon || 0);
       netState.p2Weapon = KuroWeapons.indexOf(cfg.p2Weapon || 0);
       netState.stageIdx = clamp(cfg.stageIdx || 0, 0, KuroWeapons.STAGES.length - 1);
+      netState.rule = normalizeRule(cfg.rule || 'bo3');
+      matchRule = netState.rule;
+      if (cfg.resetSession !== false) netState.sessionWins = [0, 0];
+      netState.rmReadyHost = false;
+      netState.rmReadyGuest = false;
       rounds = [0, 0];
       roundNum = 1;
       if (callbacks.onModeChange) callbacks.onModeChange('online');
       setupOnlineRound();
     },
 
+    resetOnlineSession() {
+      netState.sessionWins = [0, 0];
+      netState.rmReadyHost = false;
+      netState.rmReadyGuest = false;
+    },
+
     setOnlineRematchWeapon(wepIdx) {
       if (mode !== 'online' || !netState.active) return;
       const idx = KuroWeapons.indexOf(wepIdx);
-      if (netState.role === 'host') netState.p1Weapon = idx;
-      else netState.p2Weapon = idx;
+      if (netState.role === 'host') {
+        netState.p1Weapon = idx;
+        netState.rmReadyHost = false;
+      } else {
+        netState.p2Weapon = idx;
+        netState.rmReadyGuest = false;
+      }
       KuroNet.sendReliable(['rm_wep', netState.role, idx]);
+      emitRematchSync();
+    },
+
+    setOnlineRematchRule(rule) {
+      if (mode !== 'online' || !netState.active || netState.role !== 'host') return;
+      netState.rule = normalizeRule(rule);
+      netState.rmReadyHost = false;
+      netState.rmReadyGuest = false;
+      KuroNet.sendReliable(['rm_rule', netState.rule]);
+      emitRematchSync();
+    },
+
+    toggleOnlineRematchReady() {
+      if (mode !== 'online' || !netState.active) return;
+      if (netState.role === 'host') netState.rmReadyHost = !netState.rmReadyHost;
+      else netState.rmReadyGuest = !netState.rmReadyGuest;
+      const val = netState.role === 'host' ? netState.rmReadyHost : netState.rmReadyGuest;
+      KuroNet.sendReliable(['rm_rdy', netState.role, val ? 1 : 0]);
+      emitRematchSync();
+      maybeHostLaunchRematch();
+    },
+
+    sendOnlineEmote(code) {
+      const em = EMOTES[code];
+      if (!em || !global.KuroNet) return;
+      const role = KuroNet.getState().role || netState.role || 'host';
+      KuroFX.SFX.play('hover');
+      KuroNet.sendReliable(['emote', role, code]);
+      if (callbacks.onOnlineEmote) callbacks.onOnlineEmote({ fromRole: role, code, ...em, self: true });
     },
 
     requestRematch() {
       if (mode === 'story') KuroGame.startStory();
       else if (mode === 'endless') KuroGame.startEndless();
+      else if (mode === 'practice') KuroGame.startPractice();
       else if (mode === 'local2p') KuroGame.startLocal2P();
-      else if (mode === 'online') {
-        roundNum = 1;
-        rounds = [0, 0];
-        matchEnded = false;
-        KuroNet.sendReliable(['rm', netState.p1Weapon, netState.p2Weapon]);
-        setupOnlineRound();
-      }
+      else if (mode === 'online') KuroGame.toggleOnlineRematchReady();
     },
 
     applyScroll(scrollId) {
@@ -2866,6 +3254,13 @@
     },
 
     setTouchButton(name, down) {
+      if (name === 'kiai') {
+        if (down) {
+          const myF = getMyFighter();
+          if (myF) myF.kiaiRequested = true;
+        }
+        return;
+      }
       KuroControls.setTouchButton(name, down);
     },
   };
