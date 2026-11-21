@@ -1,4 +1,6 @@
-/* KUROKAZE IV — Kurosawa Sumi-e Renderer, Articulated Skeletons & Dynamic HUD
+/* KUROKAZE IV — Kurosawa Sumi-e Renderer (v2)
+ * Hakama/Haori silhouettes, 2-handed grip IK, sword-tip brushstroke trails,
+ * 3-phase attack poses, dust puffs, Counter-Hit bursts & dynamic HUD.
  * Loaded after controls.js, weapons.js, and fx.js, and before game.js.
  */
 (function (global) {
@@ -13,35 +15,52 @@
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, t) => a + (b - a) * t;
   const rand = (a, b) => a + Math.random() * (b - a);
+  const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 
-  /* ==================== ARTICULATED SKELETON POSES ==================== */
+  /* ==================== ARTICULATED SKELETON POSES (3-PHASE) ==================== */
   const POSES = {
-    idle:       { py:-52, tr:.14, hd:-.05, uL:.55, fL:1.5,  uR:.35, fR:1.45, lL:-.28, sL:-.15, lR:.32, sR:-.20, sw:.42 },
-    idleOdachi: { py:-50, tr:.08, hd:-.04, uL:.35, fL:1.2,  uR:-.55,fR:-.95, lL:-.36, sL:-.16, lR:.38, sR:-.22, sw:-1.25 },
-    idleNagi:   { py:-51, tr:.18, hd:-.06, uL:1.05,fL:1.5,  uR:.15, fR:1.3,  lL:-.38, sL:-.18, lR:.42, sR:-.24, sw:.12 },
-    idleDual:   { py:-47, tr:.34, hd:-.14, uL:-.45,fL:.55,  uR:.95, fR:1.6,  lL:-.44, sL:-.24, lR:.46, sR:-.34, sw:-.35 },
-    sheathed:   { py:-52, tr:.06, hd:-.02, uL:.22, fL:1.15, uR:.18, fR:1.05, lL:-.22, sL:-.10, lR:.26, sR:-.12, sw:-1.45 },
-    runA:       { py:-47, tr:.56, hd:-.26, uL:-.7, fL:-.2,  uR:-.5, fR:-.1,  lL:-.84, sL:-.44, lR:.80, sR:-.60, sw:-1.15 },
-    runB:       { py:-45, tr:.56, hd:-.26, uL:.55, fL:1.15, uR:-.6, fR:-.2,  lL:.74,  sL:-.56, lR:-.80,sR:-.42, sw:-1.10 },
-    jump:       { py:-54, tr:.25, hd:-.10, uL:.80, fL:1.55, uR:-.45,fR:.35,  lL:-.55, sL:-1.05,lR:.75, sR:-.65, sw:-.65 },
-    fall:       { py:-54, tr:.10, hd:.08,  uL:1.25,fL:1.85, uR:-.65,fR:-.1,  lL:-.35, sL:-.75, lR:.45, sR:-.35, sw:-.45 },
-    dash:       { py:-39, tr:.88, hd:-.45, uL:-.95,fL:-.6,  uR:-.8, fR:-.5,  lL:-.95, sL:-.35, lR:.85, sR:-.75, sw:-1.35 },
-    guard:      { py:-48, tr:-.08,hd:.04,  uL:1.05,fL:2.25, uR:1.15,fR:2.1,  lL:-.42, sL:-.25, lR:.48, sR:-.35, sw:1.42 },
-    parry:      { py:-50, tr:-.24,hd:.05,  uL:.55, fL:1.45, uR:2.25,fR:2.55, lL:-.50, sL:-.25, lR:.55, sR:-.38, sw:.85 },
-    clash:      { py:-45, tr:.28, hd:-.08, uL:1.18,fL:2.15, uR:1.26,fR:2.05, lL:-.58, sL:-.30, lR:.62, sR:-.42, sw:1.18 },
-    windup:     { py:-45, tr:-.34,hd:.10,  uL:.45, fL:1.35, uR:2.58,fR:2.95, lL:-.48, sL:-.30, lR:.52, sR:-.38, sw:.95 },
-    slash1:     { py:-46, tr:.52, hd:-.22, uL:-.45,fL:.25,  uR:1.42,fR:1.55, lL:-.60, sL:-.28, lR:.65, sR:-.45, sw:-.10 },
-    slash2:     { py:-54, tr:-.24,hd:-.10, uL:-.35,fL:.55,  uR:2.55,fR:2.75, lL:-.45, sL:-.20, lR:.50, sR:-.28, sw:.45 },
-    slash3:     { py:-42, tr:.72, hd:-.30, uL:-.75,fL:-.3,  uR:.75, fR:.82,  lL:-.75, sL:-.35, lR:.78, sR:-.55, sw:-.32 },
-    thrust:     { py:-46, tr:.65, hd:-.28, uL:1.35,fL:1.55, uR:1.50,fR:1.58, lL:-.78, sL:-.30, lR:.78, sR:-.50, sw:.02 },
-    aim:        { py:-48, tr:.18, hd:-.05, uL:1.45,fL:1.60, uR:1.35,fR:1.55, lL:-.45, sL:-.22, lR:.48, sR:-.32, sw:.0 },
-    airSlash:   { py:-52, tr:.48, hd:-.15, uL:-.55,fL:.15,  uR:1.15,fR:1.25, lL:-.45, sL:-.95, lR:.85, sR:-.45, sw:-.22 },
-    vault:      { py:-56, tr:.62, hd:-.18, uL:1.25,fL:1.75, uR:1.85,fR:2.15, lL:-.85, sL:-1.25,lR:.72, sR:-.95, sw:-.75 },
-    whirl:      { py:-45, tr:.38, hd:-.12, uL:-1.1,fL:-1.2, uR:1.35,fR:1.45, lL:-.62, sL:-.28, lR:.64, sR:-.36, sw:-.06 },
-    iai:        { py:-34, tr:.65, hd:-.35, uL:.65, fL:1.45, uR:-.45,fR:.55,  lL:-.72, sL:-.78, lR:.78, sR:-.82, sw:-1.48 },
-    hurt:       { py:-46, tr:-.55,hd:-.35, uL:.55, fL:.25,  uR:-.65,fR:-.2,  lL:-.25, sL:-.18, lR:.48, sR:-.22, sw:.60 },
-    stagger:    { py:-38, tr:-.40,hd:.28,  uL:-.35,fL:-.2,  uR:-.55,fR:.15,  lL:-.45, sL:-.35, lR:.50, sR:-.42, sw:-.75 },
-    slam:       { py:-34, tr:.78, hd:-.10, uL:.65, fL:.45,  uR:.62, fR:.42,  lL:-.78, sL:-.85, lR:.80, sR:-.88, sw:-.45 },
+    idle:         { py:-52, tr:.14, hd:-.05, uL:.55, fL:1.5,  uR:.35, fR:1.45, lL:-.28, sL:-.15, lR:.32, sR:-.20, sw:.42 },
+    idleOdachi:   { py:-50, tr:.08, hd:-.04, uL:.35, fL:1.2,  uR:-.55,fR:-.95, lL:-.36, sL:-.16, lR:.38, sR:-.22, sw:-1.25 },
+    idleNagi:     { py:-51, tr:.18, hd:-.06, uL:1.05,fL:1.5,  uR:.15, fR:1.3,  lL:-.38, sL:-.18, lR:.42, sR:-.24, sw:.12 },
+    idleDual:     { py:-47, tr:.34, hd:-.14, uL:-.45,fL:.55,  uR:.95, fR:1.6,  lL:-.44, sL:-.24, lR:.46, sR:-.34, sw:-.35 },
+    sheathed:     { py:-52, tr:.06, hd:-.02, uL:.22, fL:1.15, uR:.18, fR:1.05, lL:-.22, sL:-.10, lR:.26, sR:-.12, sw:-1.45 },
+    runA:         { py:-47, tr:.56, hd:-.26, uL:-.7, fL:-.2,  uR:-.5, fR:-.1,  lL:-.84, sL:-.44, lR:.80, sR:-.60, sw:-1.15 },
+    runB:         { py:-45, tr:.56, hd:-.26, uL:.55, fL:1.15, uR:-.6, fR:-.2,  lL:.74,  sL:-.56, lR:-.80,sR:-.42, sw:-1.10 },
+    jump:         { py:-54, tr:.25, hd:-.10, uL:.80, fL:1.55, uR:-.45,fR:.35,  lL:-.55, sL:-1.05,lR:.75, sR:-.65, sw:-.65 },
+    fall:         { py:-54, tr:.10, hd:.08,  uL:1.25,fL:1.85, uR:-.65,fR:-.1,  lL:-.35, sL:-.75, lR:.45, sR:-.35, sw:-.45 },
+    dash:         { py:-39, tr:.88, hd:-.45, uL:-.95,fL:-.6,  uR:-.8, fR:-.5,  lL:-.95, sL:-.35, lR:.85, sR:-.75, sw:-1.35 },
+    guard:        { py:-48, tr:-.08,hd:.04,  uL:1.05,fL:2.25, uR:1.15,fR:2.1,  lL:-.42, sL:-.25, lR:.48, sR:-.35, sw:1.42 },
+    guardRecoil:  { py:-44, tr:-.26,hd:.08,  uL:1.15,fL:2.35, uR:1.30,fR:2.28, lL:-.56, sL:-.34, lR:.58, sR:-.42, sw:1.25 },
+    parry:        { py:-50, tr:-.24,hd:.05,  uL:.55, fL:1.45, uR:2.25,fR:2.55, lL:-.50, sL:-.25, lR:.55, sR:-.38, sw:.85 },
+    clash:        { py:-45, tr:.28, hd:-.08, uL:1.18,fL:2.15, uR:1.26,fR:2.05, lL:-.58, sL:-.30, lR:.62, sR:-.42, sw:1.18 },
+
+    // Windup / Anticipation poses
+    windup:       { py:-45, tr:-.34,hd:.10,  uL:.45, fL:1.35, uR:2.58,fR:2.95, lL:-.48, sL:-.30, lR:.52, sR:-.38, sw:.95 },
+    windupHigh:   { py:-47, tr:-.32,hd:.10,  uL:.55, fL:1.55, uR:2.68,fR:3.08, lL:-.50, sL:-.30, lR:.50, sR:-.36, sw:1.05 },
+    windupLow:    { py:-41, tr:.22, hd:-.06, uL:-.45,fL:.20,  uR:-.78,fR:-.45, lL:-.58, sL:-.44, lR:.60, sR:-.48, sw:-1.20 },
+    windupThrust: { py:-47, tr:-.18,hd:.05,  uL:.35, fL:1.25, uR:-.52,fR:1.20, lL:-.56, sL:-.34, lR:.52, sR:-.32, sw:.08 },
+
+    // Active Strike poses
+    slash1:       { py:-46, tr:.52, hd:-.22, uL:-.45,fL:.25,  uR:1.42,fR:1.55, lL:-.60, sL:-.28, lR:.65, sR:-.45, sw:-.10 },
+    slash2:       { py:-54, tr:-.24,hd:-.10, uL:-.35,fL:.55,  uR:2.55,fR:2.75, lL:-.45, sL:-.20, lR:.50, sR:-.28, sw:.45 },
+    slash3:       { py:-42, tr:.72, hd:-.30, uL:-.75,fL:-.3,  uR:.75, fR:.82,  lL:-.75, sL:-.35, lR:.78, sR:-.55, sw:-.32 },
+    thrust:       { py:-46, tr:.65, hd:-.28, uL:1.35,fL:1.55, uR:1.50,fR:1.58, lL:-.78, sL:-.30, lR:.78, sR:-.50, sw:.02 },
+    aim:          { py:-48, tr:.18, hd:-.05, uL:1.45,fL:1.60, uR:1.35,fR:1.55, lL:-.45, sL:-.22, lR:.48, sR:-.32, sw:.0 },
+    airSlash:     { py:-52, tr:.48, hd:-.15, uL:-.55,fL:.15,  uR:1.15,fR:1.25, lL:-.45, sL:-.95, lR:.85, sR:-.45, sw:-.22 },
+    vault:        { py:-56, tr:.62, hd:-.18, uL:1.25,fL:1.75, uR:1.85,fR:2.15, lL:-.85, sL:-1.25,lR:.72, sR:-.95, sw:-.75 },
+    whirl:        { py:-45, tr:.38, hd:-.12, uL:-1.1,fL:-1.2, uR:1.35,fR:1.45, lL:-.62, sL:-.28, lR:.64, sR:-.36, sw:-.06 },
+    iai:          { py:-34, tr:.65, hd:-.35, uL:.65, fL:1.45, uR:-.45,fR:.55,  lL:-.72, sL:-.78, lR:.78, sR:-.82, sw:-1.48 },
+    slam:         { py:-34, tr:.78, hd:-.10, uL:.65, fL:.45,  uR:.62, fR:.42,  lL:-.78, sL:-.85, lR:.80, sR:-.88, sw:-.45 },
+
+    // Follow-through / Recovery poses
+    follow1:      { py:-44, tr:.58, hd:-.24, uL:-.60,fL:.05,  uR:.68, fR:.55,  lL:-.64, sL:-.30, lR:.68, sR:-.48, sw:-.52 },
+    follow2:      { py:-55, tr:-.32,hd:-.08, uL:-.25,fL:.65,  uR:2.82,fR:2.96, lL:-.44, sL:-.18, lR:.52, sR:-.28, sw:.76 },
+    follow3:      { py:-39, tr:.80, hd:-.28, uL:-.85,fL:-.42, uR:.34, fR:.22,  lL:-.80, sL:-.42, lR:.82, sR:-.60, sw:-.68 },
+    followLow:    { py:-36, tr:.72, hd:-.24, uL:-.50,fL:.10,  uR:1.35,fR:1.48, lL:-.76, sL:-.62, lR:.78, sR:-.68, sw:-.26 },
+    followThrust: { py:-44, tr:.74, hd:-.30, uL:1.48,fL:1.64, uR:1.62,fR:1.68, lL:-.82, sL:-.34, lR:.82, sR:-.54, sw:.04 },
+
+    hurt:         { py:-46, tr:-.55,hd:-.35, uL:.55, fL:.25,  uR:-.65,fR:-.2,  lL:-.25, sL:-.18, lR:.48, sR:-.22, sw:.60 },
+    stagger:      { py:-38, tr:-.40,hd:.28,  uL:-.35,fL:-.2,  uR:-.55,fR:.15,  lL:-.45, sL:-.35, lR:.50, sR:-.42, sw:-.75 },
   };
 
   function blendPose(a, b, t) {
@@ -57,15 +76,58 @@
     return POSES.idle;
   }
 
-  function buildSkel(x, y, f, p, s = 1) {
-    const pel = { x, y: y + p.py * s };
+  /**
+   * Smoothly evaluates 3-phase attack keyframes (Anticipation -> Active Whip -> Follow-Through).
+   */
+  function evalAttackPose(mv, prg) {
+    const p = clamp(prg, 0, 1);
+    const st = mv && mv.startup !== undefined ? mv.startup : 0.2;
+    const ae = mv && mv.activeEnd !== undefined ? mv.activeEnd : 0.58;
+    const wPose = (mv && mv.windupPose && POSES[mv.windupPose]) || POSES.windupHigh;
+    const sPose = (mv && mv.strikePose && POSES[mv.strikePose]) || (mv && mv.pose && POSES[mv.pose]) || POSES.slash1;
+    const fPose = (mv && mv.followPose && POSES[mv.followPose]) || POSES.follow1;
+
+    if (p < st) {
+      // Hold coiled anticipation then whip rapidly right before active window
+      const local = p / Math.max(0.01, st);
+      return blendPose(wPose, sPose, Math.pow(local, 3) * 0.45);
+    }
+    if (p < ae) {
+      const local = (p - st) / Math.max(0.01, ae - st);
+      return blendPose(wPose, sPose, 0.45 + easeOut(local) * 0.55);
+    }
+    const local = (p - ae) / Math.max(0.01, 1 - ae);
+    return blendPose(sPose, fPose, easeOut(local));
+  }
+
+  /**
+   * 2-bone analytical elbow solver so off-hand grips the sword hilt / polearm shaft cleanly.
+   */
+  function solveArmIK(sh, target, l1, l2, bendDir) {
+    const dx = target.x - sh.x;
+    const dy = target.y - sh.y;
+    const dist = clamp(Math.hypot(dx, dy), 4, l1 + l2 - 0.5);
+    const baseAng = Math.atan2(dy, dx);
+    const cosA = clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
+    const ang = baseAng + Math.acos(cosA) * bendDir;
+    return {
+      e: { x: sh.x + Math.cos(ang) * l1, y: sh.y + Math.sin(ang) * l1 },
+      h: { x: sh.x + (dx / (Math.hypot(dx, dy) || 1)) * dist, y: sh.y + (dy / (Math.hypot(dx, dy) || 1)) * dist },
+    };
+  }
+
+  function buildSkel(x, y, f, p, s = 1, squash = 0, leanExtra = 0) {
+    const sq = clamp(squash || 0, 0, 1);
+    const tr = p.tr + clamp(leanExtra || 0, -0.22, 0.22);
+    const pel = { x, y: y + (p.py + sq * 11) * s };
     const W = (lx, ly) => ({ x: pel.x + lx * f, y: pel.y + ly });
-    const sx = Math.sin(p.tr) * 34 * s;
-    const sy = -Math.cos(p.tr) * 34 * s;
-    const nx = sx + Math.sin(p.tr + p.hd * 0.5) * 8 * s;
-    const ny = sy - Math.cos(p.tr + p.hd * 0.5) * 8 * s;
-    const hx = nx + Math.sin(p.tr + p.hd) * 10.5 * s;
-    const hy = ny - Math.cos(p.tr + p.hd) * 10.5 * s;
+    const sx = Math.sin(tr) * 34 * s;
+    const sy = -Math.cos(tr) * 34 * s;
+    const nx = sx + Math.sin(tr + p.hd * 0.5) * 8 * s;
+    const ny = sy - Math.cos(tr + p.hd * 0.5) * 8 * s;
+    const hx = nx + Math.sin(tr + p.hd) * 10.5 * s;
+    const hy = ny - Math.cos(tr + p.hd) * 10.5 * s;
+
     const arm = (u, fa) => {
       const ex = sx + Math.sin(u) * 22 * s;
       const ey = sy + Math.cos(u) * 22 * s;
@@ -74,18 +136,20 @@
         h: W(ex + Math.sin(fa) * 21 * s, ey + Math.cos(fa) * 21 * s),
       };
     };
-    const leg = (u, sh) => {
-      const kx = Math.sin(u) * 26 * s;
-      const ky = Math.cos(u) * 26 * s;
-      return {
-        k: W(kx, ky),
-        ft: W(kx + Math.sin(sh) * 26 * s, ky + Math.cos(sh) * 26 * s),
-      };
+    const leg = (u, sh, spread) => {
+      const uu = u + spread * sq * 0.35;
+      const kx = Math.sin(uu) * 26 * s;
+      const ky = Math.cos(uu) * (26 - sq * 4.5) * s;
+      const ftx = kx + Math.sin(sh) * 26 * s;
+      const fty = Math.min(y - pel.y, ky + Math.cos(sh) * (26 - sq * 4.5) * s);
+      return { k: W(kx, ky), ft: W(ftx, fty) };
     };
+
     const aL = arm(p.uL, p.fL);
     const aR = arm(p.uR, p.fR);
-    const lL = leg(p.lL, p.sL);
-    const lR = leg(p.lR, p.sR);
+    const lL = leg(p.lL, p.sL, -1);
+    const lR = leg(p.lR, p.sR, 1);
+
     return {
       pel,
       sh: W(sx, sy),
@@ -223,7 +287,7 @@
     ctx.stroke();
   }
 
-  /* ==================== STAGE BACKDROP ==================== */
+  /* ==================== STAGE BACKDROP & BAMBOO ==================== */
   function drawBackdrop(inv, stId, world) {
     const fx = global.KuroFX;
     const inUlt = world.state === 'ULT';
@@ -254,13 +318,11 @@
     ctx.fillStyle = sky;
     ctx.fillRect(-320, -240, VW + 640, VH + 480);
 
-    // Blood Moon distant lightning flash
     if (!inv && fx && fx.screen.lightningA > 0.02) {
       ctx.fillStyle = `rgba(242,238,229,${fx.screen.lightningA * 0.32})`;
       ctx.fillRect(-320, -240, VW + 640, VH + 480);
     }
 
-    // Moon / Crimson Eclipse
     const mx = VW * 0.52 - camX * 0.06;
     const my = VH * 0.28;
     const mr = inUlt || stId === 'bridge' ? 148 : 118;
@@ -286,7 +348,6 @@
     }
     if (inv || inUlt) return;
 
-    // Distant silhouette mountains
     ctx.save();
     ctx.translate(VW * 0.5 - camX * 0.2, 0);
     ctx.fillStyle = 'rgba(16,16,20,0.84)';
@@ -302,7 +363,6 @@
     ctx.fill();
     ctx.restore();
 
-    // Background bamboo layer (intact parallax stalks; foreground sliceable ones draw in world space)
     if (fx && (stId === 'bamboo' || isMenu)) {
       fx.state.bamboo.forEach((b) => {
         if (b.d >= 0.6 && !isMenu) return;
@@ -318,7 +378,6 @@
       });
     }
 
-    // Burning Temple Torii Gate
     if (stId === 'temple') {
       ctx.save();
       ctx.translate(VW * 0.5 - camX * 0.45, GROUND);
@@ -335,7 +394,6 @@
       ctx.restore();
     }
 
-    // Drifting bridge fog
     if (fx && (stId === 'bridge' || isMenu)) {
       fx.state.fog.forEach((p) => {
         const fxPos = ((p.x + tTime * p.spd + 1000) % 2000) - 1000;
@@ -353,7 +411,6 @@
     ctx.fillRect(-320, GROUND - 110, VW + 640, 130);
   }
 
-  /* ==================== SLICEABLE FOREGROUND BAMBOO ==================== */
   function drawSliceableBamboo(tTime, inv) {
     const fx = global.KuroFX;
     if (!fx || inv) return;
@@ -364,14 +421,12 @@
       ctx.strokeStyle = 'rgba(10,10,13,0.88)';
       ctx.lineWidth = b.w;
       ctx.lineCap = 'butt';
-
       if (!b.sliced) {
         ctx.beginPath();
         ctx.moveTo(b.x, GROUND + 8);
         ctx.quadraticCurveTo(b.x + sw * 0.4 + b.lean * 120, GROUND * 0.52, b.x + sw + b.lean * 220, -40);
         ctx.stroke();
       } else {
-        // Remaining cut stump with crisp diagonal edge
         ctx.beginPath();
         ctx.moveTo(b.x, GROUND + 8);
         ctx.lineTo(b.x + b.lean * 24, b.cutY);
@@ -382,8 +437,6 @@
         ctx.moveTo(b.x + b.lean * 24 - b.w * 0.5, b.cutY + 3);
         ctx.lineTo(b.x + b.lean * 24 + b.w * 0.5, b.cutY - 3);
         ctx.stroke();
-
-        // Falling upper bamboo half
         if (b.topLife > 0) {
           ctx.save();
           ctx.globalAlpha = clamp(b.topLife / 1.2, 0, 1);
@@ -402,7 +455,81 @@
     }
   }
 
-  /* ==================== HAT, WEAPON, SEVERED & FIGHTER DRAWING ==================== */
+  /* ==================== SWORD-TIP INK RIBBON TRAILS ==================== */
+  function pushBladeTrail(arr, bx, by, tx, ty, red, maxPts) {
+    if (arr.length > 0) {
+      const prev = arr[arr.length - 1];
+      if (Math.hypot(tx - prev.tx, ty - prev.ty) > 260) {
+        arr.length = 0; // Don't stretch ribbons across teleports
+      }
+    }
+    arr.push({ bx, by, tx, ty, red: Boolean(red), life: 1.0 });
+    while (arr.length > maxPts) arr.shift();
+  }
+
+  function decayTrail(arr, rate) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      arr[i].life -= rate;
+      if (arr[i].life <= 0) arr.splice(i, 1);
+    }
+  }
+
+  function drawBladeRibbon(arr, inv) {
+    if (!arr || arr.length < 2) return;
+    ctx.save();
+    for (let i = 1; i < arr.length; i++) {
+      const p0 = arr[i - 1];
+      const p1 = arr[i];
+      const ratio = i / (arr.length - 1);
+      const alpha = clamp(p1.life * ratio, 0, 1);
+      if (alpha <= 0.03) continue;
+
+      // Tapered ink-blade polygon between previous and current blade segment
+      ctx.globalAlpha = alpha * 0.82;
+      ctx.fillStyle = inv ? '#08080a' : '#f2eee5';
+      ctx.beginPath();
+      ctx.moveTo(p0.bx, p0.by);
+      ctx.lineTo(p0.tx, p0.ty);
+      ctx.lineTo(p1.tx, p1.ty);
+      ctx.lineTo(p1.bx, p1.by);
+      ctx.closePath();
+      ctx.fill();
+
+      // Inner dark sumi-e core
+      const m0x = lerp(p0.bx, p0.tx, 0.32);
+      const m0y = lerp(p0.by, p0.ty, 0.32);
+      const m1x = lerp(p1.bx, p1.tx, 0.32);
+      const m1y = lerp(p1.by, p1.ty, 0.32);
+      const e0x = lerp(p0.bx, p0.tx, 0.84);
+      const e0y = lerp(p0.by, p0.ty, 0.84);
+      const e1x = lerp(p1.bx, p1.tx, 0.84);
+      const e1y = lerp(p1.by, p1.ty, 0.84);
+      ctx.globalAlpha = alpha * 0.72;
+      ctx.fillStyle = inv ? '#f2eee5' : '#0b0b0e';
+      ctx.beginPath();
+      ctx.moveTo(m0x, m0y);
+      ctx.lineTo(e0x, e0y);
+      ctx.lineTo(e1x, e1y);
+      ctx.lineTo(m1x, m1y);
+      ctx.closePath();
+      ctx.fill();
+
+      // Crisp crimson leading edge on heavy/special cuts
+      if (p1.red) {
+        ctx.globalAlpha = alpha * 0.92;
+        ctx.strokeStyle = '#e03131';
+        ctx.lineWidth = 3.2 * ratio + 1;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(p0.tx, p0.ty);
+        ctx.lineTo(p1.tx, p1.ty);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ==================== HAT, GARMENTS & FIGHTER DRAWING ==================== */
   function drawHatShape(hx, hy, r, hat, f, team) {
     if (hat === 'kasa') {
       ctx.beginPath();
@@ -437,15 +564,172 @@
     }
   }
 
+  function drawGarments(sk, f, ink, rim, inv, tTime) {
+    const s = sk.s;
+    const dir = sk.f;
+    const sway = Math.sin(tTime * 5.2 + (f.id || 1)) * 4.5 * s - clamp((f.vx || 0) * 0.014, -9, 9) * s;
+
+    // 1. Flared Hakama trousers (back leg then front leg)
+    const drawHakamaLeg = (k, ft, flare) => {
+      const midX = lerp(k.x, ft.x, 0.68);
+      const midY = lerp(k.y, ft.y, 0.68);
+      ctx.fillStyle = ink;
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(sk.pel.x - dir * 8 * s, sk.pel.y - 2 * s);
+      ctx.lineTo(sk.pel.x + dir * 9 * s, sk.pel.y - 2 * s);
+      ctx.lineTo(midX + dir * flare * s + sway * 0.4, midY);
+      ctx.lineTo(midX - dir * (flare * 0.85) * s + sway * 0.8, midY + 2 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    };
+    drawHakamaLeg(sk.kL, sk.fL, 11);
+    drawHakamaLeg(sk.kR, sk.fR, 12);
+
+    // 2. Haori jacket torso & flowing coat tail
+    const shDx = sk.sh.x - sk.pel.x;
+    const shDy = sk.sh.y - sk.pel.y;
+    const len = Math.hypot(shDx, shDy) || 1;
+    const nx = (-shDy / len) * dir;
+    const ny = (shDx / len) * dir;
+
+    ctx.fillStyle = ink;
+    ctx.strokeStyle = rim;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(sk.sh.x - nx * 9 * s, sk.sh.y - ny * 9 * s);
+    ctx.lineTo(sk.sh.x + nx * 10 * s, sk.sh.y + ny * 10 * s);
+    ctx.lineTo(sk.pel.x + nx * 11 * s + sway * 0.35, sk.pel.y + 8 * s);
+    ctx.lineTo(sk.pel.x - nx * 14 * s + sway * 1.15, sk.pel.y + 13 * s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 3. Flowing Haori sleeve drape on rear upper arm
+    ctx.beginPath();
+    ctx.moveTo(sk.sh.x, sk.sh.y);
+    ctx.lineTo(sk.eR.x, sk.eR.y);
+    ctx.lineTo(sk.eR.x - dir * 7 * s + sway * 0.4, sk.eR.y + 10 * s);
+    ctx.lineTo(sk.sh.x - dir * 6 * s, sk.sh.y + 11 * s);
+    ctx.closePath();
+    ctx.fill();
+
+    // 4. Crisp Obi waist sash accent
+    ctx.strokeStyle = inv ? '#08080a' : (f.scarfCol || '#c82424');
+    ctx.lineWidth = 4.2 * s;
+    ctx.beginPath();
+    ctx.moveTo(sk.pel.x - nx * 10 * s, sk.pel.y - ny * 2 * s);
+    ctx.lineTo(sk.pel.x + nx * 10 * s, sk.pel.y + ny * 2 * s);
+    ctx.stroke();
+  }
+
   function drawFighter(f, inv, world, ghostA = 1, gRed = false, skOverride = null) {
-    const sk = skOverride || buildSkel(f.x, f.y, f.f, f.pose, f.scale);
-    const W = global.KuroWeapons ? KuroWeapons.get(f.weaponIdx || 0) : { len: 78, dual: false, guardCrush: false };
+    const leanExtra = f.vx ? clamp((f.vx / 480) * 0.14 * f.f, -0.14, 0.14) : 0;
+    const sk = skOverride || buildSkel(f.x, f.y, f.f, f.pose, f.scale, f.landSquash || 0, leanExtra);
+    const W = global.KuroWeapons ? KuroWeapons.get(f.weaponIdx || 0) : { len: 78, dual: false, twoHanded: true, guardCrush: false };
+
+    const isSheathed =
+      Boolean(f.sheathed) ||
+      f.act === 'taunt' ||
+      (f.act === 'iai' && f.iaiStage === 0) ||
+      (world && world.ult && world.ult.caster === f && world.ult.sheathed);
+
+    // Two-handed grip IK: snap off-hand to hilt/shaft for katana, odachi, and naginata
+    const useTwoHanded =
+      !skOverride &&
+      !isSheathed &&
+      W.twoHanded &&
+      f.role !== 'gunner' &&
+      f.role !== 'brute' &&
+      f.act !== 'hurt' &&
+      f.act !== 'stagger' &&
+      f.act !== 'dash';
+
+    if (useTwoHanded) {
+      const offset = f.weapon === 'naginata' ? 24 * sk.s : 11 * sk.s;
+      const grip = {
+        x: sk.hR.x - Math.cos(sk.swAng) * offset,
+        y: sk.hR.y - Math.sin(sk.swAng) * offset,
+      };
+      const ik = solveArmIK(sk.sh, grip, 22 * sk.s, 21 * sk.s, sk.f);
+      sk.eL = ik.e;
+      sk.hL = ik.h;
+    }
+
     const ink =
       ghostA < 1
         ? gRed ? 'rgba(200,36,36,0.65)' : 'rgba(14,14,18,0.72)'
         : f.flashT > 0 ? '#f2eee5' : '#08080a';
     const rim = ghostA < 1 ? 'rgba(242,238,229,0.38)' : f.stagT > 0 ? '#e03131' : '#f2eee5';
-    const lw = (f.role === 'boss' || f.role === 'brute' ? 8 : 6.4) * sk.s;
+    const lw = (f.role === 'boss' || f.role === 'brute' ? 8 : 6.2) * sk.s;
+
+    // Ground contact shadow
+    if (ghostA >= 1 && !f.dead) {
+      const hFrac = clamp(1 - (GROUND - f.y) / 240, 0.25, 1);
+      ctx.save();
+      ctx.fillStyle = inv ? 'rgba(8,8,10,0.22)' : 'rgba(0,0,0,0.52)';
+      ctx.beginPath();
+      ctx.ellipse(f.x, GROUND + 3, 28 * sk.s * hFrac, 5.5 * hFrac, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Update & draw blade ribbon trails behind the fighter
+    const low = global.KuroFX ? KuroFX.isLowFx() : false;
+    const trailMax = low ? 5 : 8;
+    const trailActive =
+      ghostA >= 1 &&
+      !isSheathed &&
+      !f.dead &&
+      f.role !== 'gunner' &&
+      (f.act === 'attack' || f.act === 'airSlash' || f.act === 'skillQ' || f.act === 'skillE' || f.act === 'iai');
+
+    if (ghostA >= 1 && !skOverride) {
+      if (!f._trail) f._trail = [];
+      if (!f._trail2) f._trail2 = [];
+      if (world.state !== 'PAUSED') {
+        decayTrail(f._trail, 0.16);
+        decayTrail(f._trail2, 0.18);
+      }
+      if (trailActive && world.state !== 'PAUSED') {
+        const an = sk.swAng;
+        const ln = W.len * sk.s;
+        const isRedTrail = Boolean(
+          (f.activeMove && (f.activeMove.red || f.activeMove.heavy)) ||
+          W.guardCrush ||
+          f.act === 'skillQ' ||
+          f.act === 'skillE' ||
+          f.act === 'iai' ||
+          f.unblockable ||
+          (f.role === 'boss' && f.phase === 2)
+        );
+        if (f.weapon === 'naginata') {
+          const bx = sk.hR.x + Math.cos(an) * 72 * sk.s;
+          const by = sk.hR.y + Math.sin(an) * 72 * sk.s;
+          const tx = sk.hR.x + Math.cos(an) * 120 * sk.s;
+          const ty = sk.hR.y + Math.sin(an) * 120 * sk.s;
+          pushBladeTrail(f._trail, bx, by, tx, ty, isRedTrail, trailMax);
+        } else {
+          const bx = sk.hR.x + Math.cos(an) * (ln * 0.2);
+          const by = sk.hR.y + Math.sin(an) * (ln * 0.2);
+          const tx = sk.hR.x + Math.cos(an) * ln;
+          const ty = sk.hR.y + Math.sin(an) * ln;
+          pushBladeTrail(f._trail, bx, by, tx, ty, isRedTrail, trailMax);
+          if (W.dual) {
+            const an2 = an - 0.35 * f.f;
+            const bx2 = sk.hL.x + Math.cos(an2) * (ln * 0.2);
+            const by2 = sk.hL.y + Math.sin(an2) * (ln * 0.2);
+            const tx2 = sk.hL.x + Math.cos(an2) * (ln * 0.9);
+            const ty2 = sk.hL.y + Math.sin(an2) * (ln * 0.9);
+            pushBladeTrail(f._trail2, bx2, by2, tx2, ty2, true, trailMax);
+          }
+        }
+      }
+      drawBladeRibbon(f._trail, inv);
+      if (W.dual) drawBladeRibbon(f._trail2, inv);
+    }
 
     ctx.save();
     ctx.globalAlpha = ghostA;
@@ -454,14 +738,14 @@
 
     const body = (ex, c) => {
       seg(sk.pel, sk.kL, lw + ex, c);
-      seg(sk.kL, sk.fL, lw * 0.88 + ex, c);
+      seg(sk.kL, sk.fL, lw * 0.85 + ex, c);
       seg(sk.pel, sk.kR, lw + ex, c);
-      seg(sk.kR, sk.fR, lw * 0.88 + ex, c);
-      seg(sk.pel, sk.sh, lw * 1.24 + ex, c);
-      seg(sk.sh, sk.eL, lw * 0.84 + ex, c);
-      seg(sk.eL, sk.hL, lw * 0.8 + ex, c);
-      seg(sk.sh, sk.eR, lw * 0.84 + ex, c);
-      seg(sk.eR, sk.hR, lw * 0.8 + ex, c);
+      seg(sk.kR, sk.fR, lw * 0.85 + ex, c);
+      seg(sk.pel, sk.sh, lw * 1.2 + ex, c);
+      seg(sk.sh, sk.eL, lw * 0.82 + ex, c);
+      seg(sk.eL, sk.hL, lw * 0.78 + ex, c);
+      seg(sk.sh, sk.eR, lw * 0.82 + ex, c);
+      seg(sk.eR, sk.hR, lw * 0.78 + ex, c);
       ctx.fillStyle = c;
       ctx.beginPath();
       ctx.arc(sk.hd.x, sk.hd.y, sk.hr + ex * 0.5, 0, Math.PI * 2);
@@ -470,14 +754,13 @@
     body(3, rim);
     body(0, ink);
 
-    const isSheathed =
-      Boolean(f.sheathed) ||
-      f.act === 'taunt' ||
-      (f.act === 'iai' && f.iaiStage === 0) ||
-      (world && world.ult && world.ult.caster === f && world.ult.sheathed);
+    // Layer stylized Hakama & Haori ink garments on living fighters
+    if (ghostA >= 0.85) {
+      drawGarments(sk, f, ink, rim, inv, world ? world.tTime : 0);
+    }
 
+    // Weapon / Scabbard
     if (isSheathed && ghostA >= 0.45) {
-      // Draw saya scabbard tucked at hip
       const scAng = f.f > 0 ? 2.85 : 0.29;
       const sx1 = sk.pel.x + f.f * 8;
       const sy1 = sk.pel.y + 2;
@@ -493,10 +776,15 @@
       const blade = (ox, oy, ang, len, th, red) => {
         const tx = ox + Math.cos(ang) * len;
         const ty = oy + Math.sin(ang) * len;
-        seg({ x: ox - Math.cos(ang) * 14, y: oy - Math.sin(ang) * 14 }, { x: ox, y: oy }, 4, '#18181d');
+        seg({ x: ox - Math.cos(ang) * 16, y: oy - Math.sin(ang) * 16 }, { x: ox, y: oy }, 4.2, '#18181d');
+        // Tsuba guard
+        const px = -Math.sin(ang) * 5.5;
+        const py = Math.cos(ang) * 5.5;
+        seg({ x: ox - px, y: oy - py }, { x: ox + px, y: oy + py }, 2.6, '#c82424');
         seg({ x: ox, y: oy }, { x: tx, y: ty }, th, '#111115');
-        seg({ x: ox, y: oy }, { x: tx, y: ty }, th * 0.46, red ? '#e03131' : '#f2eee5');
+        seg({ x: ox, y: oy }, { x: tx, y: ty }, th * 0.48, red ? '#e03131' : '#f2eee5');
       };
+
       if (f.role === 'gunner') {
         const tx = hx + f.f * 64;
         const ty = hy - 4;
@@ -518,20 +806,19 @@
         seg({ x: hx, y: hy }, { x: tx, y: ty }, 12, '#0e0e12');
         seg({ x: hx, y: hy }, { x: tx, y: ty }, 4, f.unblockable ? '#e03131' : '#9a968e');
       } else if (f.weapon === 'naginata') {
-        const bx = hx - Math.cos(an) * 34;
-        const by = hy - Math.sin(an) * 34;
+        const bx = hx - Math.cos(an) * 38;
+        const by = hy - Math.sin(an) * 38;
         const mx = hx + Math.cos(an) * 76;
         const my = hy + Math.sin(an) * 76;
         seg({ x: bx, y: by }, { x: mx, y: my }, 4.2, '#222228');
-        blade(mx, my, an, 44, 6, f.act === 'airSlash' || f.act === 'skillQ' || f.act === 'skillE');
+        blade(mx, my, an, 46, 6.2, f.act === 'airSlash' || f.act === 'skillQ' || f.act === 'skillE');
       } else if (W.dual) {
         blade(hx, hy, an, ln, 4.4, false);
         blade(sk.hL.x, sk.hL.y, an - 0.35 * f.f, ln * 0.9, 4.2, true);
       } else {
-        blade(hx, hy, an, ln, W.guardCrush ? 7.2 : 4.8, (f.role === 'boss' && f.phase === 2) || f.act === 'skillQ' || f.act === 'skillE');
+        blade(hx, hy, an, ln, W.guardCrush ? 7.4 : 4.8, (f.role === 'boss' && f.phase === 2) || f.act === 'skillQ' || f.act === 'skillE');
       }
 
-      // Telegraph cross glint
       if (f.act === 'windup' && ghostA >= 1) {
         const g = Math.sin(clamp(1 - f.actT / Math.max(0.05, f.actD), 0, 1) * Math.PI);
         const r1 = 34 * g + 8;
@@ -561,7 +848,6 @@
 
     drawHatShape(sk.hd.x, sk.hd.y, sk.hr, f.hat, f.f, f.team);
 
-    // Bleed aura indicator (Dual Blade stacks)
     if (f.bleedT > 0 && ghostA >= 1) {
       ctx.fillStyle = 'rgba(224,49,49,0.75)';
       ctx.beginPath();
@@ -569,7 +855,6 @@
       ctx.fill();
     }
 
-    // Execution kanji 殺
     if (f.execMark && ghostA >= 1) {
       const p = 1 + 0.14 * Math.sin(world.tTime * 16);
       ctx.save();
@@ -665,7 +950,6 @@
       ctx.restore();
     }
 
-    // Spinning Hats
     for (const h of fx.state.hats) {
       ctx.save();
       ctx.globalAlpha = clamp(h.l / 1.4, 0, 1);
@@ -675,7 +959,6 @@
       ctx.restore();
     }
 
-    // Planted Weapons
     for (const pw of fx.state.planted) {
       const a = clamp(pw.l / 1.6, 0, 1);
       const len = pw.weapon === 'odachi' ? 96 : pw.weapon === 'naginata' ? 108 : pw.weapon === 'wakizashi' ? 54 : 74;
@@ -685,10 +968,8 @@
       ctx.translate(pw.x, pw.y);
       ctx.rotate(pw.ang + wob);
       ctx.lineCap = 'round';
-      // Blade stuck downward into ground
       seg({ x: 0, y: 0 }, { x: 0, y: -len * 0.72 }, pw.weapon === 'odachi' ? 6.2 : 4.2, '#111115');
       seg({ x: 0, y: 0 }, { x: 0, y: -len * 0.72 }, 2.1, '#f2eee5');
-      // Guard & hilt at top
       seg({ x: -8, y: -len * 0.72 }, { x: 8, y: -len * 0.72 }, 3.2, '#c82424');
       seg({ x: 0, y: -len * 0.72 }, { x: 0, y: -len * 0.94 }, 4.2, '#18181d');
       ctx.restore();
@@ -726,7 +1007,6 @@
     ctx.strokeStyle = 'rgba(242,238,229,0.42)';
     ctx.strokeRect(x, y + 6, w, 14);
 
-    // Posture bar
     const posR = clamp(f.pos / f.maxPos, 0, 1);
     ctx.fillStyle = 'rgba(8,8,10,0.9)';
     ctx.fillRect(x, y + 23, w, 4);
@@ -734,7 +1014,6 @@
     if (right) ctx.fillRect(x + w * (1 - posR), y + 23, w * posR, 4);
     else ctx.fillRect(x, y + 23, w * posR, 4);
 
-    // Ki bar
     const kiR = clamp(f.ki / f.maxKi, 0, 1);
     ctx.fillStyle = 'rgba(8,8,10,0.9)';
     ctx.fillRect(x, y + 30, w, 6);
@@ -806,7 +1085,6 @@
       }
     }
 
-    // Center Wave / Round title
     ctx.save();
     ctx.textAlign = 'center';
     ctx.font = '800 12px Georgia, serif';
@@ -817,7 +1095,6 @@
     else ctx.fillText(`ROUND ${world.roundNum} • BEST OF 3`, VW * 0.5, topY + 10);
     ctx.restore();
 
-    // Desktop Dynamic Weapon-Skill Bar (updates live with custom keybinds & chosen blade)
     const isTouch = global.KuroControls ? KuroControls.IS_TOUCH : false;
     if (!isTouch && world.myFighter && world.mode !== 'local2p') {
       const f = world.myFighter;
@@ -847,7 +1124,6 @@
       ctx.restore();
     }
 
-    // Standoff Opening Overlay (待 -> 抜 DRAW!)
     if (world.standoff && world.standoff.active) {
       const so = world.standoff;
       const atkKey = global.KuroControls ? KuroControls.getLabel('atk', 0) : 'SLASH';
@@ -874,7 +1150,6 @@
       ctx.restore();
     }
 
-    // Blade Clash (Tsubazeriai) Gauge
     if (world.clash && world.clash.active) {
       const cl = world.clash;
       const atkKey = global.KuroControls ? KuroControls.getLabel('atk', 0) : 'SLASH';
@@ -901,7 +1176,6 @@
       ctx.restore();
     }
 
-    // Cinematic Kanji Banner
     if (world.banner && world.banner.t > 0) {
       const b = world.banner;
       const alpha = clamp(Math.min(b.t * 3, (b.dur - b.t) * 6 + 0.2), 0, 1);
@@ -945,7 +1219,6 @@
 
     drawBackdrop(inv, stId, world);
 
-    // World Camera Space
     ctx.save();
     ctx.translate(VW * 0.5 + scr.shakeX, VH * 0.58 + scr.shakeY);
     ctx.scale(world.camZoom, world.camZoom);
@@ -961,7 +1234,6 @@
     ctx.lineTo(RIGHT_B + 300, GROUND + 1);
     ctx.stroke();
 
-    // Bridge Railings
     if (!inv && stId === 'bridge') {
       ctx.strokeStyle = 'rgba(200,36,36,0.46)';
       ctx.lineWidth = 4;
@@ -977,12 +1249,8 @@
       }
     }
 
-    // Sliceable foreground bamboo on Bamboo Rain
-    if (!isMenu && stId === 'bamboo') {
-      drawSliceableBamboo(world.tTime, inv);
-    }
+    if (!isMenu && stId === 'bamboo') drawSliceableBamboo(world.tTime, inv);
 
-    // Rain ripples & footstep splashes
     if (fx && !inv && (stId === 'bamboo' || isMenu || stId === 'bridge')) {
       ctx.strokeStyle = 'rgba(242,238,229,0.26)';
       ctx.lineWidth = 1.2;
@@ -1011,7 +1279,6 @@
         drawFighter(u, false, world, 1);
       });
     } else {
-      // Ground stains
       if (fx) {
         fx.state.stains.forEach((m) => {
           ctx.fillStyle = m.red
@@ -1033,7 +1300,6 @@
         });
       }
 
-      // Shadow clones
       (world.clones || []).forEach((c) => {
         drawFighter(
           { weaponIdx: 0, weapon: 'katana', hat: c.hat, role: 'player', team: c.team, f: c.f, scale: 1, flashT: 0, stagT: 0 },
@@ -1045,10 +1311,8 @@
         );
       });
 
-      // Severed pieces, spinning hats, planted swords
       drawSeveredPieces(inv);
 
-      // Living fighters (dead fighters with severed=true are already replaced by pieces)
       (world.fighters || []).forEach((f) => {
         if (f.dead && f.severed) return;
         if (!f.dead) f.scarf.draw(ctx, inv, f.scarfCol);
@@ -1065,7 +1329,6 @@
         }
       });
 
-      // Blade Clash central sparks
       if (world.clash && world.clash.active) {
         const cx = world.clash.x;
         const cy = world.clash.y;
@@ -1112,7 +1375,7 @@
         });
       }
 
-      // Projectiles (bullet, kunai, wave, bWave, Odachi ground shockwave)
+      // Projectiles
       (world.projs || []).forEach((pr) => {
         ctx.save();
         ctx.translate(pr.x, pr.y);
@@ -1130,12 +1393,9 @@
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-26, 0); ctx.stroke();
         } else if (pr.k === 'shock') {
-          // Earthsplitter ground wave
           ctx.fillStyle = '#c82424';
           ctx.beginPath();
-          ctx.moveTo(-26, 12);
-          ctx.lineTo(18, -36);
-          ctx.lineTo(34, 12);
+          ctx.moveTo(-26, 12); ctx.lineTo(18, -36); ctx.lineTo(34, 12);
           ctx.closePath();
           ctx.fill();
           ctx.strokeStyle = '#f2eee5';
@@ -1157,7 +1417,7 @@
         ctx.restore();
       });
 
-      // Particles, Cuts, Rings, Bolts, Ult Cuts, Floating Combat Texts
+      // Particles (sparks, ink, dust puffs, rings, cuts, bolts, counter flashStar)
       if (fx) {
         fx.state.parts.forEach((pt) => {
           const p = clamp(pt.l / pt.ml, 0, 1);
@@ -1175,6 +1435,29 @@
             ctx.beginPath();
             ctx.ellipse(pt.x, pt.y, pt.sz * (0.6 + p * 0.5), pt.sz * 0.72, Math.atan2(pt.vy, pt.vx), 0, Math.PI * 2);
             ctx.fill();
+          } else if (pt.k === 'dust') {
+            ctx.fillStyle = inv ? 'rgba(12,12,15,0.28)' : pt.c;
+            ctx.globalAlpha = p * 0.65;
+            ctx.beginPath();
+            ctx.ellipse(pt.x, pt.y, pt.r, pt.r * 0.52, 0, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (pt.k === 'flashStar') {
+            const rad = pt.r * (0.6 + (1 - p) * 0.8);
+            ctx.translate(pt.x, pt.y);
+            ctx.rotate(pt.ang || 0);
+            ctx.strokeStyle = pt.c || '#e03131';
+            ctx.lineWidth = 7 * p;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-rad, 0); ctx.lineTo(rad, 0);
+            ctx.moveTo(0, -rad * 0.85); ctx.lineTo(0, rad * 0.85);
+            ctx.stroke();
+            ctx.strokeStyle = '#f2eee5';
+            ctx.lineWidth = 3 * p;
+            ctx.beginPath();
+            ctx.moveTo(-rad * 0.75, 0); ctx.lineTo(rad * 0.75, 0);
+            ctx.moveTo(0, -rad * 0.65); ctx.lineTo(0, rad * 0.65);
+            ctx.stroke();
           } else if (pt.k === 'ring') {
             ctx.strokeStyle = pt.c;
             ctx.lineWidth = pt.lw * p;
@@ -1269,7 +1552,6 @@
       }
     }
 
-    // Impact Flash
     if (scr.flashA > 0.01) {
       ctx.fillStyle = scr.flashCol;
       ctx.globalAlpha = scr.flashA;
@@ -1277,7 +1559,6 @@
       ctx.globalAlpha = 1;
     }
 
-    // 16mm Film Grain
     if (world.settings.grain && !low) {
       if (!grainPattern) grainPattern = ctx.createPattern(grainCanvas, 'repeat');
       ctx.save();
@@ -1290,7 +1571,6 @@
       ctx.restore();
     }
 
-    // Radial Cinema Vignette (deepens crimson slightly during kill-anticipation slow-mo)
     const vg = ctx.createRadialGradient(VW * 0.5, VH * 0.5, VW * 0.3, VW * 0.5, VH * 0.5, VW * 0.72);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, scr.slowT > 0.04 ? 'rgba(90,8,10,0.62)' : 'rgba(0,0,0,0.5)');
@@ -1300,7 +1580,6 @@
     drawHud(world);
     ctx.restore();
 
-    // Widescreen Letterbox Bars (tighter during Standoff & Ult)
     const dramatic = world.state === 'ULT' || (world.standoff && world.standoff.active);
     if (world.settings.letterbox || dramatic) {
       const bar = Math.round((dramatic ? 54 : 18) * (cv.height / VH));
@@ -1320,6 +1599,7 @@
     Scarf,
     blendPose,
     idlePoseFor,
+    evalAttackPose,
     buildSkel,
     init,
     resize,
