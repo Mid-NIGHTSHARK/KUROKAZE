@@ -1,0 +1,13 @@
+{
+  "name": "kurokaze-duel",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13"
+  }
+}
