@@ -1,4 +1,4 @@
-/* KUROKAZE IV — Procedural Audio, Attack-Driven Severing Physics & Stage Micro-FX
+/* KUROKAZE IV — Procedural Audio (Pitch-Varied), Severing Physics, Dust & Counter-Hit FX (v2)
  * Loaded after controls.js & weapons.js, and before render.js & game.js.
  */
 (function (global) {
@@ -14,8 +14,9 @@
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, t) => a + (b - a) * t;
   const rand = (a, b) => a + Math.random() * (b - a);
+  const jit = (base, spread = 0.1) => base * (1 + (Math.random() * 2 - 1) * spread);
 
-  /* ==================== PROCEDURAL WEB AUDIO ==================== */
+  /* ==================== PROCEDURAL WEB AUDIO (PITCH-VARIED) ==================== */
   const SFX = {
     ctx: null,
     master: null,
@@ -63,7 +64,7 @@
       const o = this.ctx.createOscillator();
       const g = this.ctx.createGain();
       o.type = type;
-      o.frequency.setValueAtTime(f0, t);
+      o.frequency.setValueAtTime(Math.max(20, f0), t);
       o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + d);
       g.gain.setValueAtTime(v, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + d);
@@ -81,7 +82,7 @@
       s.buffer = this.noise;
       f.type = ft;
       f.Q.value = q;
-      f.frequency.setValueAtTime(f0, t);
+      f.frequency.setValueAtTime(Math.max(60, f0), t);
       f.frequency.exponentialRampToValueAtTime(Math.max(60, f1), t + d);
       g.gain.setValueAtTime(v, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + d);
@@ -96,34 +97,51 @@
       if (!this.ctx || this.muted || this.vol <= 0.001) return;
       try {
         if (k === 'hover') {
-          this.tone(2900, 1850, 0.06, 0.06);
-          this.burst(4200, 1800, 0.04, 0.04, 'highpass');
+          this.tone(jit(2900, 0.05), jit(1850, 0.05), 0.06, 0.06);
+          this.burst(jit(4200, 0.06), 1800, 0.04, 0.04, 'highpass');
         } else if (k === 'swing') {
-          this.burst(2600, 520, 0.12, 0.22);
+          this.burst(jit(2600, 0.12), jit(520, 0.12), jit(0.115, 0.08), 0.22, 'bandpass', jit(1.6, 0.1));
+          this.tone(jit(420, 0.1), jit(140, 0.1), 0.08, 0.06, 'triangle');
         } else if (k === 'heavy') {
-          this.burst(1500, 220, 0.21, 0.34);
+          this.burst(jit(1480, 0.1), jit(215, 0.1), jit(0.21, 0.07), 0.34, 'bandpass', jit(1.4, 0.1));
+          this.tone(jit(185, 0.08), jit(58, 0.08), 0.18, 0.16, 'triangle');
         } else if (k === 'pole') {
-          this.burst(2100, 420, 0.16, 0.26, 'bandpass', 2.4);
+          this.burst(jit(2150, 0.11), jit(420, 0.11), jit(0.155, 0.08), 0.26, 'bandpass', jit(2.4, 0.1));
         } else if (k === 'hit') {
-          this.tone(145, 36, 0.12, 0.42, 'triangle');
-          this.burst(2200, 900, 0.08, 0.2, 'highpass');
+          this.tone(jit(148, 0.11), jit(36, 0.09), 0.12, 0.42, 'triangle');
+          this.burst(jit(2250, 0.12), jit(880, 0.12), 0.08, 0.2, 'highpass');
         } else if (k === 'heavyHit') {
-          this.tone(175, 28, 0.22, 0.6, 'triangle');
-          this.burst(1800, 420, 0.14, 0.32, 'highpass');
+          this.tone(jit(175, 0.09), jit(28, 0.08), 0.22, 0.6, 'triangle');
+          this.burst(jit(1800, 0.1), jit(420, 0.1), 0.14, 0.32, 'highpass');
+        } else if (k === 'counter') {
+          // Crisp counter-hit steel snap + low chest punch
+          this.tone(jit(2180, 0.06), jit(3240, 0.06), 0.24, 0.24, 'sine');
+          this.tone(jit(1320, 0.06), jit(680, 0.06), 0.22, 0.18, 'triangle');
+          this.tone(jit(160, 0.08), 32, 0.26, 0.64, 'triangle');
+          this.burst(jit(3400, 0.1), 920, 0.11, 0.28, 'highpass');
         } else if (k === 'guard') {
-          this.tone(740, 620, 0.11, 0.16, 'square');
-          this.tone(1240, 1020, 0.1, 0.1, 'triangle');
+          this.tone(jit(760, 0.1), jit(620, 0.1), 0.11, 0.16, 'square');
+          this.tone(jit(1280, 0.1), jit(1020, 0.1), 0.1, 0.1, 'triangle');
         } else if (k === 'parry') {
-          [1568, 2349, 3520, 4698].forEach((f, i) => this.tone(f, f * 0.985, 0.6, 0.22 / (i * 0.7 + 1)));
+          const p = jit(1, 0.035);
+          [1568, 2349, 3520, 4698].forEach((f, i) =>
+            this.tone(f * p, f * p * 0.985, 0.6, 0.22 / (i * 0.7 + 1))
+          );
           this.tone(115, 38, 0.4, 0.58);
         } else if (k === 'clash') {
-          this.tone(1980, 1420, 0.45, 0.26, 'triangle');
-          this.tone(3120, 2280, 0.36, 0.18, 'sine');
-          this.burst(3800, 1400, 0.14, 0.24, 'bandpass', 3.0);
+          const p = jit(1, 0.05);
+          this.tone(1980 * p, 1420 * p, 0.45, 0.26, 'triangle');
+          this.tone(3120 * p, 2280 * p, 0.36, 0.18, 'sine');
+          this.burst(jit(3800, 0.08), 1400, 0.14, 0.24, 'bandpass', 3.0);
         } else if (k === 'glint') {
-          this.tone(2150, 3450, 0.12, 0.14);
+          this.tone(jit(2150, 0.05), jit(3450, 0.05), 0.12, 0.14);
         } else if (k === 'dash') {
-          this.burst(980, 220, 0.14, 0.24);
+          this.burst(jit(980, 0.12), jit(220, 0.12), 0.14, 0.24);
+        } else if (k === 'land') {
+          this.tone(jit(96, 0.12), 34, 0.09, 0.2, 'sine');
+          this.burst(jit(520, 0.12), 160, 0.08, 0.14, 'lowpass', 0.9);
+        } else if (k === 'step') {
+          this.burst(jit(820, 0.14), 260, 0.035, 0.045, 'bandpass', 1.2);
         } else if (k === 'taiko') {
           this.tone(118, 38, 0.48, 0.68);
           this.burst(340, 90, 0.22, 0.18, 'lowpass');
@@ -131,16 +149,16 @@
           this.tone(86, 42, 0.24, 0.48);
           this.tone(86, 38, 0.28, 0.32, 'sine', 0.26);
         } else if (k === 'kunai') {
-          this.tone(1950, 760, 0.08, 0.14, 'triangle');
+          this.tone(jit(1950, 0.1), jit(760, 0.1), 0.08, 0.14, 'triangle');
         } else if (k === 'gun') {
-          this.burst(3600, 280, 0.18, 0.48, 'lowpass', 0.8);
-          this.tone(240, 48, 0.14, 0.45, 'sawtooth');
+          this.burst(jit(3600, 0.08), 280, 0.18, 0.48, 'lowpass', 0.8);
+          this.tone(jit(240, 0.08), 48, 0.14, 0.45, 'sawtooth');
         } else if (k === 'wave') {
-          this.burst(1900, 300, 0.22, 0.3);
-          this.tone(360, 90, 0.3, 0.18, 'sawtooth');
+          this.burst(jit(1900, 0.09), 300, 0.22, 0.3);
+          this.tone(jit(360, 0.08), 90, 0.3, 0.18, 'sawtooth');
         } else if (k === 'sheathe') {
-          this.tone(3900, 2600, 0.24, 0.24);
-          this.tone(940, 220, 0.07, 0.2, 'square', 0.04);
+          this.tone(jit(3900, 0.04), 2600, 0.24, 0.24);
+          this.tone(jit(940, 0.05), 220, 0.07, 0.2, 'square', 0.04);
         } else if (k === 'ultCut') {
           this.tone(1500 + Math.random() * 1400, 320, 0.08, 0.12, 'sawtooth');
         } else if (k === 'ultBoom') {
@@ -151,14 +169,14 @@
           this.tone(2800, 920, 0.35, 0.25);
           this.burst(2800, 320, 0.22, 0.36);
         } else if (k === 'sever') {
-          this.burst(3200, 480, 0.18, 0.36, 'bandpass', 1.4);
-          this.tone(210, 34, 0.28, 0.5, 'triangle');
+          this.burst(jit(3200, 0.09), 480, 0.18, 0.36, 'bandpass', 1.4);
+          this.tone(jit(210, 0.08), 34, 0.28, 0.5, 'triangle');
           this.burst(900, 180, 0.24, 0.24, 'lowpass', 1.0, 0.05);
         } else if (k === 'bamboo') {
-          this.tone(680, 240, 0.09, 0.16, 'triangle');
-          this.burst(2400, 900, 0.06, 0.14, 'bandpass', 2.6);
+          this.tone(jit(680, 0.12), jit(240, 0.12), 0.09, 0.16, 'triangle');
+          this.burst(jit(2400, 0.1), 900, 0.06, 0.14, 'bandpass', 2.6);
         } else if (k === 'thunder') {
-          this.burst(4200, 340, 0.26, 0.34, 'bandpass', 1.2);
+          this.burst(jit(4200, 0.08), 340, 0.26, 0.34, 'bandpass', 1.2);
           this.tone(180, 44, 0.28, 0.38, 'sawtooth');
         } else if (k === 'lightning') {
           this.burst(520, 70, 0.85, 0.24, 'lowpass', 0.7);
@@ -245,6 +263,72 @@
     lightningA: 0,
     nextLightning: rand(5.5, 11.5),
   };
+
+  /* ==================== LANDING DUST & COUNTER-HIT BURSTS ==================== */
+  function spawnLandDust(x, intensity = 1, dir = 0) {
+    const cap = lowFx ? 95 : 230;
+    const count = lowFx ? Math.max(3, Math.round(4 * intensity)) : Math.round(7 * intensity);
+    for (let i = 0; i < count; i++) {
+      if (state.parts.length >= cap) state.parts.shift();
+      const side = dir !== 0 ? -dir : (i % 2 === 0 ? -1 : 1);
+      const spd = rand(55, 165) * intensity;
+      state.parts.push({
+        k: 'dust',
+        x: x + rand(-14, 14),
+        y: GROUND - rand(2, 7),
+        vx: side * spd + (dir ? rand(-25, 25) : 0),
+        vy: -rand(16, 52) * intensity,
+        r: rand(5, 9) * intensity,
+        mr: rand(18, 30) * intensity,
+        l: rand(0.26, 0.44),
+        ml: 0.44,
+        c: 'rgba(242,238,229,0.28)',
+      });
+    }
+  }
+
+  function spawnCounterBurst(x, y, dir) {
+    SFX.play('counter');
+    vibe(28);
+    screen.hitstop = Math.max(screen.hitstop, 0.085);
+    screen.shakeAmp = Math.max(screen.shakeAmp, 15);
+    screen.shakeX += (dir || 1) * 12;
+    screen.flashA = Math.max(screen.flashA, 0.26);
+    screen.flashCol = '#c82424';
+
+    state.parts.push({
+      k: 'flashStar',
+      x,
+      y,
+      r: 72,
+      ang: rand(-0.35, 0.35),
+      c: '#e03131',
+      l: 0.22,
+      ml: 0.22,
+    });
+    state.parts.push({
+      k: 'ring',
+      x,
+      y,
+      r: 10,
+      mr: 128,
+      l: 0.26,
+      ml: 0.26,
+      c: '#e03131',
+      lw: 6,
+    });
+    applyEvent({ k: 'sparks', x, y, dir: dir || 1, n: 20, redP: 0.65 });
+    state.texts.push({
+      x,
+      y: y - 56,
+      txt: 'COUNTER!',
+      c: '#e03131',
+      sc: 1.28,
+      vy: -88,
+      l: 0.9,
+      ml: 0.9,
+    });
+  }
 
   /* ==================== SEVERING, HATS, PLANTED SWORDS & BAMBOO ==================== */
   function spawnHat(x, y, hat, dir, scale, highLaunch) {
@@ -345,7 +429,6 @@
     SFX.play('sever');
 
     if (cut === 'legs') {
-      // Lower legs stay standing briefly, then buckle; upper body flips backward
       pushSeverPiece({
         part: 'lowerLegs',
         x,
@@ -383,7 +466,6 @@
     }
 
     if (cut === 'high') {
-      // Rising / Air Sever: hat rockets upward, crest parts from kneeling torso
       spawnHat(x, y - 102 * s, hat, dir, s, true);
       pushSeverPiece({
         part: 'headCrest',
@@ -421,7 +503,6 @@
     }
 
     if (cut === 'arm') {
-      // Severed sword arm spins away + weapon plants upright into ground
       pushSeverPiece({
         part: 'arm',
         x: x + f * 18 * s,
@@ -454,7 +535,6 @@
     }
 
     if (cut === 'cleave') {
-      // Heavy Odachi / Naginata cleave: split upper & lower + arm + weapon + huge spray
       pushSeverPiece({
         part: 'lowerBody',
         x,
@@ -498,7 +578,7 @@
       return;
     }
 
-    // Default 'waist': Sanjuro 0.22s delayed freeze before upper torso slides off diagonally
+    // Default 'waist': Sanjuro 0.22s delayed freeze before upper torso slides off
     pushSeverPiece({
       part: 'lowerBody',
       x,
@@ -569,6 +649,7 @@
   }
 
   function spawnStepRipple(x, stageId) {
+    SFX.play('step');
     if (stageId !== 'bamboo' && stageId !== 'bridge') return;
     if (state.ripples.length > (lowFx ? 10 : 20)) state.ripples.shift();
     state.ripples.push({ x, r: 4, mr: rand(22, 34), l: 0.34, ml: 0.34 });
@@ -632,6 +713,10 @@
       }
     } else if (ev.k === 'ink') {
       spawnInkBurst(ev.x, ev.y, ev.dir || 0, ev.n || 14, Boolean(ev.big));
+    } else if (ev.k === 'dust') {
+      spawnLandDust(ev.x, ev.intensity || 1, ev.dir || 0);
+    } else if (ev.k === 'counter') {
+      spawnCounterBurst(ev.x, ev.y, ev.dir || 1);
     } else if (ev.k === 'ring') {
       state.parts.push({
         k: 'ring',
@@ -691,7 +776,6 @@
 
   /* ==================== UPDATE LOOP ==================== */
   function update(rdt, dt, stageId, isMenu) {
-    // Screen juice decay (runs in real time)
     if (screen.invT > 0) screen.invT = Math.max(0, screen.invT - rdt);
     if (screen.flashA > 0) screen.flashA = Math.max(0, screen.flashA - rdt * 2.5);
     if (screen.lightningA > 0) screen.lightningA = Math.max(0, screen.lightningA - rdt * 3.2);
@@ -704,7 +788,6 @@
       screen.shakeAmp = screen.shakeX = screen.shakeY = 0;
     }
 
-    // Occasional distant lightning on Blood Moon Bridge
     if (stageId === 'bridge' && !isMenu) {
       screen.nextLightning -= rdt;
       if (screen.nextLightning <= 0) {
@@ -714,7 +797,7 @@
       }
     }
 
-    // Particles
+    // Particles (sparks, ink, dust puffs, rings, cuts, bolts, counter flashStars)
     for (let i = state.parts.length - 1; i >= 0; i--) {
       const pt = state.parts[i];
       pt.l -= dt;
@@ -727,13 +810,19 @@
           pt.vx *= 0.4;
           pt.vy *= -0.2;
         }
+      } else if (pt.k === 'dust') {
+        pt.x += pt.vx * dt;
+        pt.y += pt.vy * dt;
+        pt.vx *= Math.pow(0.05, dt);
+        pt.vy *= Math.pow(0.12, dt);
+        pt.r = lerp(pt.r, pt.mr, clamp(dt * 8, 0, 1));
       } else if (pt.k === 'ring') {
         pt.r = lerp(8, pt.mr, 1 - Math.pow(clamp(pt.l / pt.ml, 0, 1), 3));
       }
       if (pt.l <= 0) state.parts.splice(i, 1);
     }
 
-    // Severed body/limb physics (includes Sanjuro delayed slide)
+    // Severed body/limb physics
     for (let i = state.severed.length - 1; i >= 0; i--) {
       const sv = state.severed[i];
       sv.l -= dt;
@@ -829,7 +918,7 @@
       }
     }
 
-    // Footstep water ripples
+    // Footstep ripples
     for (let i = state.ripples.length - 1; i >= 0; i--) {
       const rp = state.ripples[i];
       rp.l -= dt;
@@ -897,6 +986,8 @@
     applyEvent,
     addGhost,
     spawnSever,
+    spawnLandDust,
+    spawnCounterBurst,
     sliceBambooAt,
     spawnStepRipple,
     spawnBladeScrape,
