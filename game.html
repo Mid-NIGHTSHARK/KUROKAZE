@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#060607" />
+<title>KUROKAZE IV — Ink &amp; Steel</title>
+<style>
+  :root {
+    --bg: #060607;
+    --panel: rgba(12, 12, 14, 0.9);
+    --panel-solid: #111114;
+    --border: rgba(242, 238, 229, 0.18);
+    --ink: #f2eee5;
+    --muted: #9a968e;
+    --crimson: #c82424;
+    --crimson-glow: rgba(200, 36, 36, 0.34);
+    --ok: #38b86b;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+
+  input {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* ==================== STAGE CANVAS ==================== */
+  #stageWrap {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+  }
+
+  #gameCanvas {
+    width: 100%;
+    height: 100%;
+    max-width: 177.78dvh;
+    max-height: 56.25vw;
+    display: block;
+    background: #0b0b0d;
+    touch-action: none;
+  }
+
+  .hidden { display: none !important; }
+
+  /* ==================== TOP BAR (IN-GAME) ==================== */
+  #topBar {
+    position: fixed;
+    top: max(6px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    z-index: 30;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+  }
+
+  .hud-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+  }
+
+  .tele-pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 9px;
+    background: rgba(10, 10, 12, 0.72);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    letter-spacing: 0.4px;
+    backdrop-filter: blur(4px);
+  }
+
+  .tele-pill strong { color: var(--ink); font-weight: 600; }
+  .tele-pill .good { color: var(--ok); }
+  .tele-pill .warn { color: #e2a43b; }
+  .tele-pill .bad { color: #ff6b6b; }
+
+  .mini-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    background: rgba(12, 12, 14, 0.78);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    cursor: pointer;
+    transition: border-color 0.14s ease, background 0.14s ease;
+  }
+
+  .mini-btn:hover, .mini-btn:active {
+    border-color: var(--crimson);
+    background: rgba(200, 36, 36, 0.22);
+  }
+
+  /* ==================== MAIN MENU (FILM POSTER) ==================== */
+  #menuLayer {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(270px, 420px) 1fr minmax(260px, 340px);
+    align-items: center;
+    padding:
+      max(28px, env(safe-area-inset-top))
+      max(28px, env(safe-area-inset-right))
+      max(28px, env(safe-area-inset-bottom))
+      max(32px, env(safe-area-inset-left));
+    background: linear-gradient(
+      90deg,
+      rgba(6, 6, 7, 0.88) 0%,
+      rgba(6, 6, 7, 0.46) 36%,
+      rgba(6, 6, 7, 0.18) 64%,
+      rgba(6, 6, 7, 0.72) 100%
+    );
+    overflow-y: auto;
+  }
+
+  .menu-left {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .title-lockup {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .seal {
+    width: 52px;
+    height: 52px;
+    border: 2px solid var(--crimson);
+    color: var(--crimson);
+    background: rgba(11, 11, 12, 0.7);
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    transform: rotate(-4deg);
+    flex-shrink: 0;
+  }
+
+  .game-title {
+    font-family: var(--serif);
+    font-size: clamp(28px, 4.2vw, 46px);
+    letter-spacing: 6px;
+    line-height: 1.05;
+    font-weight: 700;
+  }
+
+  .game-sub {
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+
+  .credits-line {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.6px;
+  }
+  .credits-line span { color: var(--ink); }
+
+  .menu-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .menu-btn {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 13px 16px;
+    background: rgba(14, 14, 16, 0.52);
+    border: 1px solid rgba(242, 238, 229, 0.12);
+    border-left: 3px solid transparent;
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+  }
+
+  .menu-btn::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(200, 36, 36, 0.34), rgba(200, 36, 36, 0.04) 70%, transparent);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 0.18s ease;
+    z-index: 0;
+  }
+
+  .menu-btn > * { position: relative; z-index: 1; }
+
+  .menu-btn:hover, .menu-btn:focus-visible {
+    border-color: rgba(200, 36, 36, 0.65);
+    border-left-color: var(--crimson);
+    transform: translateX(4px);
+    outline: none;
+  }
+
+  .menu-btn:hover::before, .menu-btn:focus-visible::before {
+    transform: scaleX(1);
+  }
+
+  .menu-btn .tag {
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: 1.8px;
+    color: var(--muted);
+  }
+
+  .menu-btn.primary {
+    border-color: rgba(200, 36, 36, 0.5);
+    border-left-color: var(--crimson);
+  }
+  .menu-btn.primary .tag { color: #ff9c9c; }
+
+  .best-bar {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    padding-top: 8px;
+    border-top: 1px solid rgba(242, 238, 229, 0.1);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .best-bar strong { color: var(--ink); }
+
+  /* Right Weapon Selector Card */
+  .weapon-card {
+    grid-column: 3;
+    background: rgba(11, 11, 13, 0.8);
+    border: 1px solid var(--border);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    backdrop-filter: blur(6px);
+  }
+
+  .panel-kicker {
+    font-size: 10px;
+    letter-spacing: 2.8px;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .weapon-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .wep-tab {
+    padding: 9px 10px;
+    background: rgba(242, 238, 229, 0.03);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+
+  .wep-tab:hover { color: var(--ink); border-color: rgba(242, 238, 229, 0.4); }
+  .wep-tab.active {
+    color: var(--ink);
+    border-color: var(--crimson);
+    background: rgba(200, 36, 36, 0.22);
+  }
+
+  .wep-desc {
+    font-size: 12px;
+    line-height: 1.45;
+    color: #c7c2b8;
+    min-height: 36px;
+  }
+
+  .stat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .stat-track {
+    height: 6px;
+    background: rgba(242, 238, 229, 0.1);
+    overflow: hidden;
+  }
+
+  .stat-fill {
+    height: 100%;
+    background: var(--ink);
+    transition: width 0.22s ease;
+  }
+  .stat-fill.crimson { background: var(--crimson); }
+
+  /* ==================== MODALS & DRAWERS ==================== */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(6, 6, 7, 0.78);
+    backdrop-filter: blur(5px);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    overflow-y: auto;
+  }
+
+  .modal-card {
+    width: 100%;
+    max-width: 600px;
+    background: var(--panel-solid);
+    border: 1px solid var(--border);
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+
+  .modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .modal-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+
+  .modal-sub {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .btn {
+    padding: 11px 16px;
+    background: rgba(242, 238, 229, 0.05);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color 0.14s ease, background 0.14s ease;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--crimson); background: rgba(200, 36, 36, 0.18); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.crimson {
+    background: var(--crimson);
+    border-color: var(--crimson);
+    color: #fff;
+  }
+  .btn.crimson:hover:not(:disabled) { background: #df2b2b; }
+
+  .alert-box {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    background: rgba(242, 238, 229, 0.04);
+    font-size: 12px;
+    color: var(--ink);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .alert-box.err { border-color: rgba(200, 36, 36, 0.7); background: rgba(200, 36, 36, 0.16); color: #ffb3b3; }
+  .alert-box.ok { border-color: rgba(56, 184, 107, 0.6); background: rgba(56, 184, 107, 0.12); }
+
+  /* Online Entry & Room Layout */
+  .entry-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .entry-pane {
+    border: 1px solid var(--border);
+    background: rgba(242, 238, 229, 0.02);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .entry-pane h3 {
+    font-family: var(--serif);
+    font-size: 16px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .entry-pane p {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .code-inputs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .code-char {
+    width: 100%;
+    height: 48px;
+    background: #09090b;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+    outline: none;
+  }
+  .code-char:focus { border-color: var(--crimson); }
+
+  .room-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    background: rgba(242, 238, 229, 0.025);
+  }
+
+  .big-code {
+    font-family: var(--mono);
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 8px;
+    color: var(--ink);
+  }
+
+  .qr-box {
+    width: 118px;
+    height: 118px;
+    padding: 5px;
+    background: #f2eee5;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+  }
+  .qr-box img { width: 100%; height: 100%; display: block; }
+
+  .slot-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .slot-box {
+    border: 1px solid var(--border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .slot-box.mine { border-color: rgba(200, 36, 36, 0.65); }
+
+  .slot-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .slot-ready { color: var(--ok); font-weight: 700; }
+  .slot-wait { color: var(--muted); }
+
+  .mini-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .chip-btn {
+    padding: 7px 8px;
+    background: rgba(242, 238, 229, 0.03);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+  }
+  .chip-btn.active {
+    border-color: var(--crimson);
+    background: rgba(200, 36, 36, 0.24);
+    color: var(--ink);
+  }
+  .chip-btn:disabled { cursor: default; opacity: 0.72; }
+
+  .stage-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .stage-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  details.advanced {
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  details.advanced summary { cursor: pointer; letter-spacing: 1px; }
+
+  .url-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .url-input {
+    flex: 1;
+    padding: 8px 10px;
+    background: #09090b;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  /* Settings Drawer */
+  #settingsBackdrop {
+    justify-items: end;
+    padding: 0;
+  }
+  .drawer {
+    width: min(380px, 100vw);
+    height: 100dvh;
+    max-height: 100dvh;
+    border: none;
+    border-left: 1px solid var(--border);
+  }
+
+  .set-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(242, 238, 229, 0.08);
+    font-size: 13px;
+  }
+  .set-row small { display: block; font-size: 11px; color: var(--muted); }
+
+  .controls-table {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: rgba(242, 238, 229, 0.02);
+  }
+  .controls-table strong { color: var(--ink); }
+
+  /* Scroll Picker & Results */
+  .scroll-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+  }
+  .scroll-card {
+    padding: 14px;
+    background: rgba(242, 238, 229, 0.03);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.14s ease, transform 0.14s ease;
+  }
+  .scroll-card:hover { border-color: var(--crimson); transform: translateY(-2px); }
+  .scroll-jp { font-family: var(--serif); font-size: 24px; color: var(--crimson); }
+  .scroll-name { font-family: var(--serif); font-size: 15px; letter-spacing: 1.5px; text-transform: uppercase; }
+  .scroll-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+  }
+  .stat-tile {
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: rgba(242, 238, 229, 0.03);
+    text-align: center;
+  }
+  .stat-tile span { display: block; font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--muted); }
+  .stat-tile strong { display: block; font-family: var(--serif); font-size: 20px; margin-top: 4px; }
+
+  /* ==================== MOBILE TOUCH CONTROLS ==================== */
+  #touchLayer {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    pointer-events: none;
+  }
+
+  .touch-left {
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    pointer-events: auto;
+  }
+
+  /* Sliding Left-Right Rocker */
+  #moveRocker {
+    position: relative;
+    width: 176px;
+    height: 76px;
+    border-radius: 38px;
+    background: rgba(14, 14, 17, 0.62);
+    border: 1.5px solid rgba(242, 238, 229, 0.28);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 22px;
+    font-size: 22px;
+    color: rgba(242, 238, 229, 0.55);
+    touch-action: none;
+  }
+
+  #moveRocker .arrow.lit { color: var(--crimson); }
+
+  #rockerKnob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 50px;
+    height: 50px;
+    margin-left: -25px;
+    margin-top: -25px;
+    border-radius: 50%;
+    background: rgba(242, 238, 229, 0.16);
+    border: 1.5px solid rgba(242, 238, 229, 0.45);
+    pointer-events: none;
+    transition: transform 0.04s linear;
+  }
+
+  .touch-right {
+    position: fixed;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: auto;
+  }
+
+  .ki-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .ki-btn {
+    min-width: 58px;
+    height: 40px;
+    padding: 0 8px;
+    border-radius: 8px;
+    background: rgba(14, 14, 17, 0.68);
+    border: 1.5px solid rgba(242, 238, 229, 0.24);
+    color: rgba(242, 238, 229, 0.45);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.1;
+    touch-action: none;
+  }
+  .ki-btn.ready {
+    color: var(--ink);
+    border-color: var(--crimson);
+    background: rgba(200, 36, 36, 0.32);
+    box-shadow: 0 0 12px rgba(200, 36, 36, 0.35);
+  }
+  .ki-btn.pressed { transform: scale(0.93); }
+
+  .action-arc {
+    display: grid;
+    grid-template-columns: 62px 62px 80px;
+    grid-template-rows: 56px 56px;
+    gap: 8px;
+    align-items: center;
+    justify-items: center;
+  }
+
+  .t-btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(14, 14, 17, 0.66);
+    border: 1.5px solid rgba(242, 238, 229, 0.32);
+    color: var(--ink);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    display: grid;
+    place-items: center;
+    touch-action: none;
+  }
+  .t-btn.pressed {
+    background: rgba(200, 36, 36, 0.42);
+    border-color: var(--crimson);
+    transform: scale(0.93);
+  }
+
+  .t-btn.slash {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    width: 78px;
+    height: 78px;
+    border-color: rgba(200, 36, 36, 0.85);
+    background: rgba(200, 36, 36, 0.28);
+    font-size: 12px;
+  }
+  .t-btn.jump { grid-column: 2; grid-row: 1; }
+  .t-btn.dash { grid-column: 1; grid-row: 2; }
+  .t-btn.guard { grid-column: 2; grid-row: 2; }
+
+  /* Rotate Prompt for Portrait Phones */
+  #rotateOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(6, 6, 7, 0.94);
+    display: none;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .rotate-box {
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  .rotate-icon {
+    width: 58px;
+    height: 36px;
+    border: 2px solid var(--crimson);
+    border-radius: 6px;
+  }
+
+  @media (orientation: portrait) and (max-width: 760px) {
+    body.show-rotate #rotateOverlay { display: grid; }
+  }
+
+  @media (max-width: 960px) {
+    #menuLayer {
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      padding:
+        max(16px, env(safe-area-inset-top))
+        max(16px, env(safe-area-inset-right))
+        max(16px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+    }
+    .weapon-card { grid-column: 2; padding: 14px; gap: 10px; }
+    .menu-btn { padding: 10px 12px; font-size: 14px; }
+  }
+
+  @media (max-width: 680px) {
+    #menuLayer { grid-template-columns: 1fr; align-items: start; }
+    .weapon-card { grid-column: 1; }
+    .entry-grid, .slot-grid { grid-template-columns: 1fr; }
+    #moveRocker { width: 152px; height: 66px; }
+    .action-arc { grid-template-columns: 54px 54px 70px; grid-template-rows: 50px 50px; gap: 6px; }
+    .t-btn { width: 52px; height: 52px; font-size: 9px; }
+    .t-btn.slash { width: 68px; height: 68px; }
+  }
+
+  /* Missing script fallback banner */
+  #bootError {
+    position: fixed;
+    inset: 20px;
+    z-index: 99;
+    background: #141112;
+    border: 1px solid var(--crimson);
+    padding: 24px;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+  }
+</style>
+</head>
+<body class="show-rotate">
+
+  <div id="bootError">
+    <h2 style="font-family:var(--serif);letter-spacing:3px;">MISSING ENGINE FILES</h2>
+    <p id="bootErrorText" style="color:var(--muted);max-width:460px;font-size:14px;"></p>
+  </div>
+
+  <!-- CANVAS STAGE -->
+  <div id="stageWrap">
+    <canvas id="gameCanvas" width="1280" height="720"></canvas>
+  </div>
+
+  <!-- IN-GAME TOP BAR -->
+  <div id="topBar" class="hidden">
+    <div class="hud-group">
+      <div id="telePill" class="tele-pill"><strong>60</strong> FPS</div>
+    </div>
+    <div class="hud-group">
+      <button id="btnTouchToggle" class="mini-btn" type="button">Touch: Auto</button>
+      <button id="btnFullscreen" class="mini-btn" type="button">FS</button>
+      <button id="btnTopAction" class="mini-btn" type="button">Pause</button>
+    </div>
+  </div>
+
+  <!-- FILM-POSTER MAIN MENU -->
+  <section id="menuLayer" aria-label="Main Menu">
+    <div class="menu-left">
+      <div class="title-lockup">
+        <div class="seal" aria-hidden="true">黒風</div>
+        <div>
+          <h1 class="game-title">KUROKAZE IV</h1>
+          <div class="game-sub">Ink &amp; Steel • Vercel Online Duel</div>
+        </div>
+      </div>
+
+      <div class="credits-line">
+        Co-created by <span>Mid-NIGHTSHARK</span> &amp; <span>Dev Parmar (@Cran7ax)</span>
+      </div>
+
+      <nav class="menu-nav">
+        <button id="btnOnline" class="menu-btn primary" type="button">
+          <span>Online Duel</span>
+          <span class="tag">Vercel WS</span>
+        </button>
+        <button id="btnStory" class="menu-btn" type="button">
+          <span>Story Gauntlet</span>
+          <span class="tag">3 Acts + Boss</span>
+        </button>
+        <button id="btnEndless" class="menu-btn" type="button">
+          <span>Endless Dojo</span>
+          <span class="tag">Ink Scrolls</span>
+        </button>
+        <button id="btnLocal2P" class="menu-btn" type="button">
+          <span>Local 2P Duel</span>
+          <span class="tag">Same Keyboard</span>
+        </button>
+        <button id="btnSettings" class="menu-btn" type="button">
+          <span>Settings &amp; Controls</span>
+          <span class="tag">Audio / Mobile</span>
+        </button>
+      </nav>
+
+      <div class="best-bar">
+        <span>Endless Best: <strong id="bestWave">Wave 0</strong></span>
+        <span>Top Score: <strong id="bestScore">0</strong></span>
+      </div>
+    </div>
+
+    <aside class="weapon-card" aria-label="Weapon Stance Selector">
+      <div class="panel-kicker">
+        <span>Stance &amp; Blade</span>
+        <span id="wepJp" style="color:var(--crimson);font-family:var(--serif);font-size:15px;">刀</span>
+      </div>
+      <div id="menuWeaponTabs" class="weapon-tabs"></div>
+      <p id="wepDesc" class="wep-desc"></p>
+      <div class="stat-list">
+        <div class="stat-row"><span>Speed</span><div class="stat-track"><div id="stSpeed" class="stat-fill"></div></div></div>
+        <div class="stat-row"><span>Reach</span><div class="stat-track"><div id="stReach" class="stat-fill"></div></div></div>
+        <div class="stat-row"><span>Posture</span><div class="stat-track"><div id="stPosture" class="stat-fill crimson"></div></div></div>
+        <div class="stat-row"><span>Parry</span><div class="stat-track"><div id="stParry" class="stat-fill"></div></div></div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ONLINE LOBBY MODAL -->
+  <div id="onlineModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Online Duel</h2>
+          <div class="modal-sub">Encrypted Vercel WebSocket Relay • 0ms Local Movement</div>
+        </div>
+        <button id="btnCloseOnline" class="mini-btn" type="button">Back</button>
+      </div>
+
+      <div id="netAlert" class="alert-box hidden"></div>
+
+      <!-- STEP A: CREATE OR JOIN -->
+      <div id="lobbyEntry">
+        <div class="entry-grid">
+          <div class="entry-pane">
+            <div>
+              <h3>Create Room</h3>
+              <p>Open a private 4-letter room with an instant invite link and scannable QR code for phones.</p>
+            </div>
+            <button id="btnCreateRoom" class="btn crimson" type="button">Create Room</button>
+          </div>
+
+          <div class="entry-pane">
+            <div>
+              <h3>Join Room</h3>
+              <p>Type your friend's 4-letter code below. Connects automatically on the 4th character.</p>
+            </div>
+            <div class="code-inputs" id="codeInputs">
+              <input class="code-char" maxlength="1" autocomplete="off" inputmode="text" aria-label="Code character 1" />
+              <input class="code-char" maxlength="1" autocomplete="off" inputmode="text" aria-label="Code character 2" />
+              <input class="code-char" maxlength="1" autocomplete="off" inputmode="text" aria-label="Code character 3" />
+              <input class="code-char" maxlength="1" autocomplete="off" inputmode="text" aria-label="Code character 4" />
+            </div>
+            <button id="btnJoinRoom" class="btn" type="button">Join Room</button>
+          </div>
+        </div>
+
+        <details class="advanced" style="margin-top:14px;">
+          <summary>Server URL Override (only needed if opened outside Vercel)</summary>
+          <div class="url-row">
+            <input id="wsUrlInput" class="url-input" type="text" placeholder="wss://your-app.vercel.app/api/ws" />
+            <button id="btnSaveWsUrl" class="mini-btn" type="button">Save</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- STEP B: ACTIVE ROOM LOBBY -->
+      <div id="lobbyRoom" class="hidden" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="room-top">
+          <div>
+            <div class="modal-sub">Room Code</div>
+            <div id="roomCodeDisplay" class="big-code">----</div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+              <button id="btnCopyInvite" class="mini-btn" type="button">Copy Invite Link</button>
+              <button id="btnLeaveRoom" class="mini-btn" type="button">Leave Room</button>
+            </div>
+          </div>
+          <div id="qrWrap" class="qr-box">
+            <img id="qrImg" alt="Scan to join room" />
+          </div>
+        </div>
+
+        <div class="slot-grid">
+          <div id="slotP1" class="slot-box">
+            <div class="slot-head">
+              <strong id="p1RoleLabel">Host (P1)</strong>
+              <span id="p1ReadyBadge" class="slot-wait">Not Ready</span>
+            </div>
+            <div id="p1WepGrid" class="mini-grid"></div>
+          </div>
+
+          <div id="slotP2" class="slot-box">
+            <div class="slot-head">
+              <strong id="p2RoleLabel">Guest (P2)</strong>
+              <span id="p2ReadyBadge" class="slot-wait">Waiting...</span>
+            </div>
+            <div id="p2WepGrid" class="mini-grid"></div>
+          </div>
+        </div>
+
+        <div class="stage-row">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="modal-sub" style="margin:0;">Stage:</span>
+            <div id="stagePills" class="stage-pills"></div>
+          </div>
+          <button id="btnReady" class="btn crimson" type="button" disabled>Ready</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS DRAWER -->
+  <div id="settingsBackdrop" class="modal-backdrop hidden">
+    <div class="modal-card drawer">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Settings</h2>
+          <div class="modal-sub">Audio, Visuals &amp; Mobile Ergonomics</div>
+        </div>
+        <button id="btnCloseSettings" class="mini-btn" type="button">Done</button>
+      </div>
+
+      <div class="set-row">
+        <div>Volume<small>Procedural katana &amp; parry SFX</small></div>
+        <input id="setVol" type="range" min="0" max="1" step="0.05" value="0.7" />
+      </div>
+
+      <div class="set-row">
+        <div>Performance Mode<small>Low disables grain &amp; caps DPR for 60 FPS</small></div>
+        <button id="setPerf" class="mini-btn" type="button">Auto</button>
+      </div>
+
+      <div class="set-row">
+        <div>16mm Film Grain<small>Subtle cinema noise (desktop)</small></div>
+        <button id="setGrain" class="mini-btn" type="button">On</button>
+      </div>
+
+      <div class="set-row">
+        <div>Cinema Letterbox<small>Widescreen top &amp; bottom bars</small></div>
+        <button id="setLetterbox" class="mini-btn" type="button">On</button>
+      </div>
+
+      <div class="set-row">
+        <div>Touch Controls<small>Show on-screen arcade controls</small></div>
+        <button id="setTouch" class="mini-btn" type="button">Auto</button>
+      </div>
+
+      <div class="panel-kicker" style="margin-top:6px;"><span>Keyboard Controls</span><span>P1 / Local P2</span></div>
+      <div class="controls-table">
+        <div><strong>Move:</strong> A / D</div><div><strong>P2 Move:</strong> ← / →</div>
+        <div><strong>Jump:</strong> W / Space</div><div><strong>P2 Jump:</strong> ↑</div>
+        <div><strong>Slash:</strong> J / Z / F</div><div><strong>P2 Slash:</strong> J / Num1</div>
+        <div><strong>Guard / Parry:</strong> K / X</div><div><strong>P2 Guard:</strong> K / Num2</div>
+        <div><strong>Flash-Step:</strong> L / Shift</div><div><strong>P2 Dash:</strong> L / Num3</div>
+        <div><strong>Ki Skills:</strong> Q / E / R</div><div><strong>P2 Ki:</strong> U / I / O</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INK SCROLL PICKER (ENDLESS) -->
+  <div id="scrollModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2 class="modal-title">Choose an Ink Scroll</h2>
+          <div class="modal-sub">Wave Cleared — Permanent Technique for This Run</div>
+        </div>
+      </div>
+      <div id="scrollGrid" class="scroll-grid"></div>
+    </div>
+  </div>
+
+  <!-- PAUSE MODAL -->
+  <div id="pauseModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width:380px;text-align:center;">
+      <h2 class="modal-title">Paused</h2>
+      <button id="btnResume" class="btn crimson" type="button">Resume</button>
+      <button id="btnRestart" class="btn" type="button">Restart</button>
+      <button id="btnPauseSettings" class="btn" type="button">Settings</button>
+      <button id="btnPauseMenu" class="btn" type="button">Return to Menu</button>
+    </div>
+  </div>
+
+  <!-- RESULTS MODAL -->
+  <div id="resultModal" class="modal-backdrop hidden">
+    <div class="modal-card" style="max-width:460px;text-align:center;">
+      <div id="resKicker" class="modal-sub" style="color:var(--crimson);">MATCH COMPLETE</div>
+      <h2 id="resTitle" class="modal-title">VICTORY</h2>
+      <p id="resSub" style="font-size:13px;color:var(--muted);"></p>
+      <div id="resStats" class="stats-grid"></div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px;">
+        <button id="btnRematch" class="btn crimson" type="button">Rematch</button>
+        <button id="btnResultMenu" class="btn" type="button">Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOBILE MULTI-TOUCH CONTROLS -->
+  <div id="touchLayer" class="hidden" aria-label="Touch Controls">
+    <div class="touch-left">
+      <div id="moveRocker" role="slider" aria-label="Move Left or Right">
+        <span id="arrowLeft" class="arrow">◀</span>
+        <div id="rockerKnob"></div>
+        <span id="arrowRight" class="arrow">▶</span>
+      </div>
+    </div>
+
+    <div class="touch-right">
+      <div class="ki-row">
+        <button id="tbQ" class="ki-btn" data-btn="q" type="button"><span>Q</span><small>30 KI</small></button>
+        <button id="tbE" class="ki-btn" data-btn="e" type="button"><span>E</span><small>40 KI</small></button>
+        <button id="tbR" class="ki-btn" data-btn="r" type="button"><span>R</span><small>ULT</small></button>
+      </div>
+      <div class="action-arc">
+        <button class="t-btn jump" data-btn="jump" type="button">Jump</button>
+        <button class="t-btn dash" data-btn="dash" type="button">Dash</button>
+        <button class="t-btn guard" data-btn="guard" type="button">Parry</button>
+        <button class="t-btn slash" data-btn="slash" type="button">Slash</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PORTRAIT ROTATE PROMPT -->
+  <div id="rotateOverlay">
+    <div class="rotate-box">
+      <div class="rotate-icon"></div>
+      <h2 class="modal-title" style="font-size:19px;">Rotate to Landscape</h2>
+      <p style="font-size:13px;color:var(--muted);line-height:1.5;">
+        Landscape orientation gives the full Kurosawa arena and ergonomic thumb controls.
+      </p>
+      <button id="btnDismissRotate" class="btn" type="button">Play Portrait Anyway</button>
+    </div>
+  </div>
+
+  <script src="./net.js"></script>
+  <script src="./game.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      if (!window.KuroNet || !window.KuroGame) {
+        const box = document.getElementById('bootError');
+        const txt = document.getElementById('bootErrorText');
+        box.style.display = 'flex';
+        txt.textContent =
+          'Could not load net.js or game.js. Make sure net.js, game.js, and kurokaze_online.html are all uploaded in the same root folder.';
+        return;
+      }
+
+      const $ = (id) => document.getElementById(id);
+
+      let currentMode = 'menu';
+      let selectedWeapon = 0;
+      let touchPref = 'auto'; // auto | on | off
+
+      // Online Lobby State
+      const lobby = {
+        p1Wep: 0,
+        p2Wep: 0,
+        stage: 0,
+        p1Ready: false,
+        p2Ready: false,
+        inMatch: false,
+      };
+
+      /* ==================== HELPERS ==================== */
+      function show(el, visible) {
+        if (!el) return;
+        el.classList.toggle('hidden', !visible);
+      }
+
+      function refreshTouchVisibility() {
+        const shouldShow =
+          currentMode !== 'menu' &&
+          (touchPref === 'on' || (touchPref === 'auto' && KuroGame.IS_TOUCH));
+        show($('touchLayer'), shouldShow);
+        const label = 'Touch: ' + touchPref.toUpperCase();
+        $('btnTouchToggle').textContent = label;
+        $('setTouch').textContent = touchPref.toUpperCase();
+      }
+
+      function refreshBest() {
+        const b = KuroGame.loadBest();
+        $('bestWave').textContent = 'Wave ' + (b.wave || 0);
+        $('bestScore').textContent = String(b.score || 0);
+      }
+
+      function setNetAlert(msg, kind) {
+        const el = $('netAlert');
+        if (!msg) {
+          show(el, false);
+          el.textContent = '';
+          el.className = 'alert-box hidden';
+          return;
+        }
+        el.textContent = msg;
+        el.className = 'alert-box ' + (kind || '');
+        show(el, true);
+      }
+
+      /* ==================== WEAPON SELECTOR (MENU) ==================== */
+      function renderMenuWeapons() {
+        const wrap = $('menuWeaponTabs');
+        wrap.innerHTML = '';
+        KuroGame.WEAPONS.forEach((w, idx) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wep-tab' + (idx === selectedWeapon ? ' active' : '');
+          btn.innerHTML = `<span>${w.name}</span><span style="font-family:var(--serif);">${w.jp}</span>`;
+          btn.addEventListener('click', () => {
+            KuroGame.unlockAudio();
+            KuroGame.playMenuDraw();
+            selectedWeapon = idx;
+            KuroGame.setWeapon(idx);
+            renderMenuWeapons();
+          });
+          wrap.appendChild(btn);
+        });
+
+        const cur = KuroGame.WEAPONS[selectedWeapon];
+        $('wepJp').textContent = cur.jp;
+        $('wepDesc').textContent = cur.desc;
+        $('stSpeed').style.width = cur.stats.speed + '%';
+        $('stReach').style.width = cur.stats.reach + '%';
+        $('stPosture').style.width = cur.stats.posture + '%';
+        $('stParry').style.width = cur.stats.parry + '%';
+      }
+
+      /* ==================== ONLINE LOBBY UI ==================== */
+      function sendMyLobbyState() {
+        const net = KuroNet.getState();
+        if (!net.code || !net.role) return;
+        const myWep = net.role === 'host' ? lobby.p1Wep : lobby.p2Wep;
+        const myReady = net.role === 'host' ? lobby.p1Ready : lobby.p2Ready;
+        KuroNet.sendReliable(['lb', net.role, myWep, lobby.stage, myReady ? 1 : 0]);
+      }
+
+      function maybeLaunchOnlineMatch() {
+        const net = KuroNet.getState();
+        if (net.role !== 'host' || !net.peerPresent || lobby.inMatch) return;
+        if (lobby.p1Ready && lobby.p2Ready) {
+          lobby.inMatch = true;
+          KuroNet.sendReliable(['go', lobby.p1Wep, lobby.p2Wep, lobby.stage]);
+          show($('onlineModal'), false);
+          KuroGame.startOnline({
+            role: 'host',
+            p1Weapon: lobby.p1Wep,
+            p2Weapon: lobby.p2Wep,
+            stageIdx: lobby.stage,
+          });
+        }
+      }
+
+      function renderLobbyRoom() {
+        const net = KuroNet.getState();
+        const inRoom = Boolean(net.code);
+        show($('lobbyEntry'), !inRoom);
+        show($('lobbyRoom'), inRoom);
+        if (!inRoom) return;
+
+        $('roomCodeDisplay').textContent = net.code;
+
+        const qrImg = $('qrImg');
+        const qrUrl = KuroNet.getQrUrl(140);
+        if (qrImg.dataset.src !== qrUrl) {
+          qrImg.dataset.src = qrUrl;
+          show($('qrWrap'), true);
+          qrImg.onerror = () => show($('qrWrap'), false);
+          qrImg.src = qrUrl;
+        }
+
+        const isHost = net.role === 'host';
+        $('slotP1').classList.toggle('mine', isHost);
+        $('slotP2').classList.toggle('mine', !isHost);
+        $('p1RoleLabel').textContent = isHost ? 'Host (P1 • You)' : 'Host (P1)';
+        $('p2RoleLabel').textContent = !isHost ? 'Guest (P2 • You)' : 'Guest (P2)';
+
+        const p1Badge = $('p1ReadyBadge');
+        const p2Badge = $('p2ReadyBadge');
+        p1Badge.textContent = lobby.p1Ready ? 'READY' : isHost || net.peerPresent ? 'Not Ready' : 'Waiting...';
+        p1Badge.className = lobby.p1Ready ? 'slot-ready' : 'slot-wait';
+
+        p2Badge.textContent = !net.peerPresent && isHost ? 'Waiting...' : lobby.p2Ready ? 'READY' : 'Not Ready';
+        p2Badge.className = lobby.p2Ready ? 'slot-ready' : 'slot-wait';
+
+        // Weapon pickers
+        buildLobbyWeaponGrid($('p1WepGrid'), lobby.p1Wep, isHost, (idx) => {
+          lobby.p1Wep = idx;
+          lobby.p1Ready = false;
+          sendMyLobbyState();
+          renderLobbyRoom();
+        });
+        buildLobbyWeaponGrid($('p2WepGrid'), lobby.p2Wep, !isHost, (idx) => {
+          lobby.p2Wep = idx;
+          lobby.p2Ready = false;
+          sendMyLobbyState();
+          renderLobbyRoom();
+        });
+
+        // Stage pills (Host picks)
+        const stageWrap = $('stagePills');
+        stageWrap.innerHTML = '';
+        KuroGame.STAGES.forEach((st, idx) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'chip-btn' + (idx === lobby.stage ? ' active' : '');
+          b.textContent = st.name;
+          b.disabled = !isHost;
+          b.addEventListener('click', () => {
+            if (!isHost) return;
+            lobby.stage = idx;
+            sendMyLobbyState();
+            renderLobbyRoom();
+          });
+          stageWrap.appendChild(b);
+        });
+
+        const myReady = isHost ? lobby.p1Ready : lobby.p2Ready;
+        const readyBtn = $('btnReady');
+        readyBtn.disabled = !net.peerPresent;
+        readyBtn.textContent = !net.peerPresent ? 'Waiting for Opponent...' : myReady ? 'Cancel Ready' : 'Ready to Duel';
+      }
+
+      function buildLobbyWeaponGrid(container, activeIdx, canEdit, onPick) {
+        container.innerHTML = '';
+        KuroGame.WEAPONS.forEach((w, idx) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'chip-btn' + (idx === activeIdx ? ' active' : '');
+          b.textContent = w.name;
+          b.disabled = !canEdit;
+          b.addEventListener('click', () => onPick(idx));
+          container.appendChild(b);
+        });
+      }
+
+      function handleLobbyRelay(payload) {
+        const tag = payload[0];
+        if (tag === 'lb') {
+          const [, role, wep, stg, rdy] = payload;
+          if (role === 'host') {
+            lobby.p1Wep = wep || 0;
+            lobby.stage = stg || 0;
+            lobby.p1Ready = Boolean(rdy);
+          } else {
+            lobby.p2Wep = wep || 0;
+            lobby.p2Ready = Boolean(rdy);
+          }
+          renderLobbyRoom();
+          maybeLaunchOnlineMatch();
+        } else if (tag === 'go') {
+          const [, w1, w2, stg] = payload;
+          lobby.p1Wep = w1 || 0;
+          lobby.p2Wep = w2 || 0;
+          lobby.stage = stg || 0;
+          lobby.inMatch = true;
+          show($('onlineModal'), false);
+          KuroGame.startOnline({
+            role: KuroNet.getState().role,
+            p1Weapon: lobby.p1Wep,
+            p2Weapon: lobby.p2Wep,
+            stageIdx: lobby.stage,
+          });
+        }
+      }
+
+      /* ==================== NET EVENTS ==================== */
+      KuroNet.on('status', (st) => {
+        if (st.status === 'connecting') {
+          setNetAlert('Connecting to Vercel WebSocket relay...', '');
+        } else if (st.status === 'waiting') {
+          const info = st.region ? ` (${st.region})` : '';
+          setNetAlert(`Room ${st.code} open${info} — share code or scan QR to join.`, '');
+        } else if (st.status === 'connected') {
+          const pathLabel = st.path === 'ram' ? 'Direct RAM' : st.path === 'redis' ? 'Redis Bus' : 'Linked';
+          const pingTxt = st.ping ? ` • ${st.ping}ms` : '';
+          const regTxt = st.region ? ` • ${st.region}` : '';
+          setNetAlert(`Opponent connected${pingTxt}${regTxt} • ${pathLabel}`, 'ok');
+        } else if (st.status === 'reconnecting') {
+          setNetAlert(st.lastErr || 'Reconnecting...', 'err');
+        } else if (st.lastErr) {
+          setNetAlert(st.lastErr, 'err');
+        } else {
+          setNetAlert('', '');
+        }
+        renderLobbyRoom();
+      });
+
+      KuroNet.on('room', (st) => {
+        lobby.p1Ready = false;
+        lobby.p2Ready = false;
+        lobby.inMatch = false;
+        if (st.role === 'host') lobby.p1Wep = selectedWeapon;
+        else lobby.p2Wep = selectedWeapon;
+        renderLobbyRoom();
+        if (st.peerPresent) sendMyLobbyState();
+      });
+
+      KuroNet.on('peer', (ev) => {
+        if (ev.type === 'joined') {
+          if (!lobby.inMatch) sendMyLobbyState();
+          renderLobbyRoom();
+        } else if (ev.type === 'left') {
+          lobby.p1Ready = false;
+          lobby.p2Ready = false;
+          if (lobby.inMatch && currentMode === 'online') {
+            lobby.inMatch = false;
+            show($('resultModal'), false);
+            KuroGame.returnToMenu();
+            show($('onlineModal'), true);
+            setNetAlert('Opponent left the match.', 'err');
+          }
+          renderLobbyRoom();
+        } else if (ev.type === 'reconnecting') {
+          setNetAlert('Opponent momentarily reconnecting...', '');
+        }
+      });
+
+      KuroNet.on('error', (msg) => {
+        setNetAlert(msg, 'err');
+      });
+
+      /* ==================== ENGINE INIT ==================== */
+      KuroGame.init($('gameCanvas'), {
+        onModeChange(nextMode) {
+          currentMode = nextMode;
+          show($('menuLayer'), nextMode === 'menu');
+          show($('topBar'), nextMode !== 'menu');
+          $('btnTopAction').textContent = nextMode === 'online' ? 'Leave' : 'Pause';
+          if (nextMode === 'menu') {
+            lobby.inMatch = false;
+            refreshBest();
+            renderMenuWeapons();
+          }
+          refreshTouchVisibility();
+        },
+
+        onPauseChange(isPaused) {
+          show($('pauseModal'), isPaused);
+        },
+
+        onScrollPrompt(choices) {
+          const grid = $('scrollGrid');
+          grid.innerHTML = '';
+          choices.forEach((sc) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'scroll-card';
+            b.innerHTML = `
+              <div class="scroll-jp">${sc.jp}</div>
+              <div class="scroll-name">${sc.name}</div>
+              <div class="scroll-desc">${sc.desc}</div>
+            `;
+            b.addEventListener('click', () => {
+              show($('scrollModal'), false);
+              KuroGame.applyScroll(sc.id);
+            });
+            grid.appendChild(b);
+          });
+          show($('scrollModal'), true);
+        },
+
+        onResult(res) {
+          $('resKicker').textContent = res.win ? 'BLADE SUPREME' : 'DUEL CONCLUDED';
+          $('resTitle').textContent = res.title;
+          $('resSub').textContent = res.sub;
+          const wrap = $('resStats');
+          wrap.innerHTML = '';
+          (res.stats || []).forEach(([k, v]) => {
+            const d = document.createElement('div');
+            d.className = 'stat-tile';
+            d.innerHTML = `<span>${k}</span><strong>${v}</strong>`;
+            wrap.appendChild(d);
+          });
+          show($('btnRematch'), Boolean(res.canRematch));
+          show($('resultModal'), true);
+        },
+
+        onOnlineLobbyMsg: handleLobbyRelay,
+
+        onRematchStarted() {
+          show($('resultModal'), false);
+        },
+
+        onSkillState(s) {
+          $('tbQ').classList.toggle('ready', s.qReady);
+          $('tbE').classList.toggle('ready', s.eReady);
+          $('tbR').classList.toggle('ready', s.rReady);
+        },
+
+        onTelemetry(t) {
+          const pill = $('telePill');
+          const fpsCls = t.fps >= 50 ? 'good' : t.fps >= 35 ? 'warn' : 'bad';
+          if (t.mode === 'online') {
+            const pCls = t.ping <= 65 ? 'good' : t.ping <= 130 ? 'warn' : 'bad';
+            const pathTxt = t.path === 'ram' ? 'RAM' : t.path === 'redis' ? 'REDIS' : 'WAIT';
+            const regTxt = t.region ? ` • ${t.region}` : '';
+            pill.innerHTML = `<span class="${fpsCls}">${t.fps} FPS</span> • <span class="${pCls}">${t.ping}ms</span>${regTxt} • <strong>${pathTxt}</strong>`;
+          } else {
+            pill.innerHTML = `<span class="${fpsCls}">${t.fps} FPS</span>${t.lowFx ? ' • LITE' : ''}`;
+          }
+        },
+      });
+
+      /* ==================== MENU & MODAL WIRING ==================== */
+      document.querySelectorAll('.menu-btn').forEach((btn) => {
+        btn.addEventListener('mouseenter', () => KuroGame.playMenuDraw());
+      });
+
+      $('btnStory').addEventListener('click', () => KuroGame.startStory());
+      $('btnEndless').addEventListener('click', () => KuroGame.startEndless());
+      $('btnLocal2P').addEventListener('click', () => KuroGame.startLocal2P());
+
+      $('btnOnline').addEventListener('click', () => {
+        KuroGame.unlockAudio();
+        KuroGame.playMenuDraw();
+        $('wsUrlInput').value = KuroNet.getState().wsUrl || '';
+        renderLobbyRoom();
+        show($('onlineModal'), true);
+      });
+
+      $('btnCloseOnline').addEventListener('click', () => {
+        if (!lobby.inMatch && KuroNet.getState().code) KuroNet.leaveRoom();
+        show($('onlineModal'), false);
+      });
+
+      $('btnCreateRoom').addEventListener('click', () => {
+        KuroGame.unlockAudio();
+        KuroNet.createRoom();
+      });
+
+      // 4-Box Room Code Input
+      const codeBoxes = Array.from(document.querySelectorAll('#codeInputs .code-char'));
+      function readCodeBoxes() {
+        return codeBoxes.map((b) => b.value.trim().toUpperCase()).join('');
+      }
+      codeBoxes.forEach((box, idx) => {
+        box.addEventListener('input', () => {
+          const clean = box.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          box.value = clean.slice(-1);
+          if (box.value && idx < codeBoxes.length - 1) codeBoxes[idx + 1].focus();
+          const full = readCodeBoxes();
+          if (full.length === 4) KuroNet.joinRoom(full);
+        });
+        box.addEventListener('keydown', (e) => {
+          if (e.key === 'Backspace' && !box.value && idx > 0) codeBoxes[idx - 1].focus();
+          if (e.key === 'Enter') KuroNet.joinRoom(readCodeBoxes());
+        });
+        box.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const pasted = (e.clipboardData || window.clipboardData)
+            .getData('text')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '')
+            .slice(0, 4);
+          for (let i = 0; i < 4; i++) codeBoxes[i].value = pasted[i] || '';
+          if (pasted.length === 4) KuroNet.joinRoom(pasted);
+        });
+      });
+
+      $('btnJoinRoom').addEventListener('click', () => {
+        KuroGame.unlockAudio();
+        KuroNet.joinRoom(readCodeBoxes());
+      });
+
+      $('btnSaveWsUrl').addEventListener('click', () => {
+        KuroNet.setServerUrl($('wsUrlInput').value);
+        setNetAlert('Saved server URL: ' + (KuroNet.getState().wsUrl || 'Default /api/ws'), 'ok');
+      });
+
+      $('btnCopyInvite').addEventListener('click', async () => {
+        const url = KuroNet.getInviteUrl();
+        try {
+          await navigator.clipboard.writeText(url);
+          $('btnCopyInvite').textContent = 'Copied!';
+          setTimeout(() => ($('btnCopyInvite').textContent = 'Copy Invite Link'), 1400);
+        } catch {
+          prompt('Copy invite link:', url);
+        }
+      });
+
+      $('btnLeaveRoom').addEventListener('click', () => {
+        KuroNet.leaveRoom();
+        renderLobbyRoom();
+      });
+
+      $('btnReady').addEventListener('click', () => {
+        const net = KuroNet.getState();
+        if (!net.peerPresent) return;
+        KuroGame.unlockAudio();
+        KuroGame.playMenuDraw();
+        if (net.role === 'host') lobby.p1Ready = !lobby.p1Ready;
+        else lobby.p2Ready = !lobby.p2Ready;
+        sendMyLobbyState();
+        renderLobbyRoom();
+        maybeLaunchOnlineMatch();
+      });
+
+      /* ==================== SETTINGS DRAWER ==================== */
+      function syncSettingsUi() {
+        const s = KuroGame.getSettings();
+        $('setVol').value = String(s.volume);
+        $('setPerf').textContent = s.perfMode.toUpperCase();
+        $('setGrain').textContent = s.grain ? 'ON' : 'OFF';
+        $('setLetterbox').textContent = s.letterbox ? 'ON' : 'OFF';
+        refreshTouchVisibility();
+      }
+
+      $('btnSettings').addEventListener('click', () => {
+        syncSettingsUi();
+        show($('settingsBackdrop'), true);
+      });
+      $('btnCloseSettings').addEventListener('click', () => show($('settingsBackdrop'), false));
+      $('settingsBackdrop').addEventListener('click', (e) => {
+        if (e.target === $('settingsBackdrop')) show($('settingsBackdrop'), false);
+      });
+
+      $('setVol').addEventListener('input', (e) => {
+        KuroGame.updateSettings({ volume: parseFloat(e.target.value) });
+      });
+      $('setPerf').addEventListener('click', () => {
+        const order = ['auto', 'high', 'low'];
+        const cur = KuroGame.getSettings().perfMode;
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        KuroGame.updateSettings({ perfMode: next });
+        syncSettingsUi();
+      });
+      $('setGrain').addEventListener('click', () => {
+        KuroGame.updateSettings({ grain: !KuroGame.getSettings().grain });
+        syncSettingsUi();
+      });
+      $('setLetterbox').addEventListener('click', () => {
+        KuroGame.updateSettings({ letterbox: !KuroGame.getSettings().letterbox });
+        syncSettingsUi();
+      });
+
+      function cycleTouchPref() {
+        const order = ['auto', 'on', 'off'];
+        touchPref = order[(order.indexOf(touchPref) + 1) % order.length];
+        refreshTouchVisibility();
+      }
+      $('setTouch').addEventListener('click', cycleTouchPref);
+      $('btnTouchToggle').addEventListener('click', cycleTouchPref);
+
+      /* ==================== TOP BAR, PAUSE & RESULTS ==================== */
+      $('btnFullscreen').addEventListener('click', () => {
+        const docEl = document.documentElement;
+        if (!document.fullscreenElement) {
+          if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+          else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        }
+      });
+
+      $('btnTopAction').addEventListener('click', () => {
+        if (currentMode === 'online') {
+          KuroNet.leaveRoom();
+          KuroGame.returnToMenu();
+        } else {
+          KuroGame.togglePause();
+        }
+      });
+
+      $('btnResume').addEventListener('click', () => KuroGame.togglePause(false));
+      $('btnRestart').addEventListener('click', () => {
+        show($('pauseModal'), false);
+        KuroGame.requestRematch();
+      });
+      $('btnPauseSettings').addEventListener('click', () => {
+        syncSettingsUi();
+        show($('settingsBackdrop'), true);
+      });
+      $('btnPauseMenu').addEventListener('click', () => {
+        show($('pauseModal'), false);
+        KuroGame.returnToMenu();
+      });
+
+      $('btnRematch').addEventListener('click', () => {
+        show($('resultModal'), false);
+        KuroGame.requestRematch();
+      });
+      $('btnResultMenu').addEventListener('click', () => {
+        show($('resultModal'), false);
+        if (currentMode === 'online') KuroNet.leaveRoom();
+        KuroGame.returnToMenu();
+      });
+
+      $('btnDismissRotate').addEventListener('click', () => {
+        document.body.classList.remove('show-rotate');
+      });
+
+      /* ==================== MULTI-TOUCH CONTROLS ==================== */
+      const rocker = $('moveRocker');
+      const knob = $('rockerKnob');
+      const arrowL = $('arrowLeft');
+      const arrowR = $('arrowRight');
+      let rockerPointerId = null;
+
+      function updateRocker(clientX) {
+        const rect = rocker.getBoundingClientRect();
+        const mid = rect.left + rect.width * 0.5;
+        const maxDx = rect.width * 0.36;
+        const raw = (clientX - mid) / maxDx;
+        const clamped = Math.max(-1, Math.min(1, raw));
+        const axis = Math.abs(clamped) < 0.16 ? 0 : clamped > 0 ? 1 : -1;
+        KuroGame.setTouchAxis(axis);
+        knob.style.transform = `translateX(${Math.round(clamped * maxDx)}px)`;
+        arrowL.classList.toggle('lit', axis < 0);
+        arrowR.classList.toggle('lit', axis > 0);
+      }
+
+      function resetRocker() {
+        rockerPointerId = null;
+        KuroGame.setTouchAxis(0);
+        knob.style.transform = 'translateX(0px)';
+        arrowL.classList.remove('lit');
+        arrowR.classList.remove('lit');
+      }
+
+      rocker.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        KuroGame.unlockAudio();
+        rockerPointerId = e.pointerId;
+        try { rocker.setPointerCapture(e.pointerId); } catch {}
+        updateRocker(e.clientX);
+      });
+      rocker.addEventListener('pointermove', (e) => {
+        if (e.pointerId !== rockerPointerId) return;
+        e.preventDefault();
+        updateRocker(e.clientX);
+      });
+      rocker.addEventListener('pointerup', (e) => {
+        if (e.pointerId === rockerPointerId) resetRocker();
+      });
+      rocker.addEventListener('pointercancel', (e) => {
+        if (e.pointerId === rockerPointerId) resetRocker();
+      });
+
+      // Independent multi-pointer action buttons
+      document.querySelectorAll('[data-btn]').forEach((btn) => {
+        const name = btn.dataset.btn;
+        const activeIds = new Set();
+
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          activeIds.add(e.pointerId);
+          try { btn.setPointerCapture(e.pointerId); } catch {}
+          btn.classList.add('pressed');
+          KuroGame.setTouchButton(name, true);
+        });
+
+        const release = (e) => {
+          if (!activeIds.has(e.pointerId)) return;
+          activeIds.delete(e.pointerId);
+          if (activeIds.size === 0) {
+            btn.classList.remove('pressed');
+            KuroGame.setTouchButton(name, false);
+          }
+        };
+
+        btn.addEventListener('pointerup', release);
+        btn.addEventListener('pointercancel', release);
+      });
+
+      /* ==================== BOOT ==================== */
+      refreshBest();
+      renderMenuWeapons();
+      syncSettingsUi();
+
+      // Auto-open & join if invite link has ?room=XXXX
+      const inviteCode = KuroNet.readRoomFromUrl();
+      if (inviteCode && inviteCode.length >= 4) {
+        for (let i = 0; i < 4; i++) codeBoxes[i].value = inviteCode[i] || '';
+        show($('onlineModal'), true);
+        KuroNet.joinRoom(inviteCode);
+      }
+    })();
+  </script>
+</body>
+</html>
