@@ -74,7 +74,7 @@
     cursor: crosshair;
   }
 
-  /* ==================== IN-GAME TOP BAR ==================== */
+  /* ==================== IN-GAME TOP BAR & PRACTICE TOOLBAR ==================== */
   #topBar {
     position: fixed;
     top: max(6px, env(safe-area-inset-top));
@@ -133,6 +133,87 @@
     background: rgba(200, 36, 36, 0.34);
   }
 
+  /* Live Dojo Practice Toolbar */
+  #practiceBar {
+    position: fixed;
+    top: max(42px, calc(env(safe-area-inset-top) + 38px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 29;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    max-width: calc(100vw - 24px);
+    padding: 5px 8px;
+    background: rgba(10, 10, 14, 0.8);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    backdrop-filter: blur(5px);
+  }
+  .prac-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 2px;
+  }
+  .prac-btn {
+    padding: 4px 8px;
+    background: rgba(242, 238, 229, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .prac-btn.active {
+    color: var(--ink);
+    border-color: var(--crimson-hi);
+    background: rgba(200, 36, 36, 0.3);
+  }
+
+  /* Kanji Emote Toast */
+  #emoteToast {
+    position: fixed;
+    top: max(54px, calc(env(safe-area-inset-top) + 48px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 55;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: rgba(12, 12, 16, 0.94);
+    border: 1px solid var(--crimson-hi);
+    border-radius: 99px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+  }
+  .emote-kanji {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 900;
+    color: var(--crimson-hi);
+    line-height: 1;
+  }
+  .emote-meta {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .emote-meta small {
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1.4px;
+  }
+
   /* ==================== FILM-POSTER MAIN MENU ==================== */
   #menuLayer {
     position: fixed;
@@ -143,9 +224,9 @@
     justify-content: space-between;
     gap: 24px;
     padding:
-      max(22px, env(safe-area-inset-top))
+      max(20px, env(safe-area-inset-top))
       max(28px, env(safe-area-inset-right))
-      max(22px, env(safe-area-inset-bottom))
+      max(20px, env(safe-area-inset-bottom))
       max(32px, env(safe-area-inset-left));
     background: linear-gradient(
       90deg,
@@ -158,10 +239,10 @@
   }
 
   .menu-left {
-    width: min(370px, 100%);
+    width: min(375px, 100%);
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
   }
 
   .title-lockup {
@@ -214,7 +295,38 @@
   .menu-nav {
     display: flex;
     flex-direction: column;
+    gap: 5px;
+  }
+
+  .nav-split {
+    display: flex;
     gap: 6px;
+    align-items: stretch;
+  }
+  .nav-split .menu-btn { flex: 1; }
+
+  .rule-cycle-btn {
+    min-width: 78px;
+    padding: 0 10px;
+    background: rgba(14, 14, 18, 0.78);
+    border: 1px solid rgba(242, 238, 229, 0.2);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: border-color 0.14s ease, background 0.14s ease;
+  }
+  .rule-cycle-btn:hover {
+    border-color: var(--crimson-hi);
+    background: rgba(200, 36, 36, 0.22);
+  }
+  .rule-cycle-btn.onecut {
+    border-color: var(--crimson-hi);
+    color: #ffb8b8;
+    background: rgba(200, 36, 36, 0.24);
   }
 
   .menu-btn {
@@ -224,15 +336,15 @@
     justify-content: space-between;
     align-items: center;
     width: 100%;
-    padding: 12px 16px;
-    background: rgba(14, 14, 18, 0.5);
+    padding: 11px 15px;
+    background: rgba(14, 14, 18, 0.52);
     border: 1px solid rgba(242, 238, 229, 0.12);
     border-left: 3px solid transparent;
     color: var(--ink);
     font-family: var(--serif);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 800;
-    letter-spacing: 3px;
+    letter-spacing: 2.8px;
     text-transform: uppercase;
     text-align: left;
     cursor: pointer;
@@ -262,7 +374,7 @@
   .menu-btn .tag {
     font-family: var(--sans);
     font-size: 9px;
-    letter-spacing: 1.8px;
+    letter-spacing: 1.6px;
     padding: 2px 7px;
     border: 1px solid rgba(242, 238, 229, 0.26);
     border-radius: 4px;
@@ -360,11 +472,7 @@
     font-size: 10px;
     color: #cbc6bc;
   }
-  .wep-skills div {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-  }
+  .wep-skills div { display: flex; justify-content: space-between; gap: 8px; }
   .wep-skills strong { color: var(--crimson-hi); font-family: var(--mono); }
 
   .stat-list { display: flex; flex-direction: column; gap: 6px; }
@@ -396,14 +504,14 @@
 
   .modal-card {
     width: 100%;
-    max-width: 580px;
+    max-width: 590px;
     background: var(--panel-solid);
     border: 1px solid rgba(242, 238, 229, 0.22);
     border-radius: 14px;
     padding: 18px 20px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 13px;
     max-height: 92dvh;
     overflow-y: auto;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
@@ -474,7 +582,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     background: #0a0a0d;
-    padding: 14px;
+    padding: 13px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -513,7 +621,7 @@
     background: #0a0a0d;
   }
   .big-code { font-family: var(--mono); font-size: 32px; font-weight: 900; letter-spacing: 8px; }
-  .qr-box { width: 106px; height: 106px; padding: 5px; border-radius: 8px; background: #f2eee5; display: grid; place-items: center; }
+  .qr-box { width: 104px; height: 104px; padding: 5px; border-radius: 8px; background: #f2eee5; display: grid; place-items: center; }
   .qr-box img { width: 100%; height: 100%; display: block; }
 
   .slot-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; letter-spacing: 1.3px; text-transform: uppercase; }
@@ -536,8 +644,33 @@
   .chip-btn.active { border-color: var(--crimson-hi); background: rgba(200, 36, 36, 0.28); color: var(--ink); }
   .chip-btn:disabled { cursor: default; opacity: 0.65; }
 
-  .stage-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .stage-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
   .stage-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+
+  .emote-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .emote-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 99px;
+    background: #0a0a0d;
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .emote-btn:hover { border-color: var(--crimson-hi); background: rgba(200, 36, 36, 0.18); }
+  .emote-btn span { font-family: var(--serif); font-size: 14px; color: var(--crimson-hi); font-weight: 900; }
 
   details.advanced { border-top: 1px solid var(--border); padding-top: 8px; font-size: 11px; color: var(--muted); }
   details.advanced summary { cursor: pointer; letter-spacing: 1px; }
@@ -633,13 +766,24 @@
   .stat-tile strong { display: block; font-family: var(--serif); font-size: 18px; margin-top: 3px; }
 
   .rematch-swap {
-    padding: 10px;
-    border-radius: 8px;
+    padding: 11px;
+    border-radius: 9px;
     background: #0a0a0d;
     border: 1px solid var(--border);
     display: flex;
     flex-direction: column;
+    gap: 9px;
+  }
+  .rm-ready-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     gap: 8px;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding-top: 6px;
+    border-top: 1px solid rgba(242, 238, 229, 0.09);
   }
 
   /* ==================== MOBILE MULTI-TOUCH CONTROLS ==================== */
@@ -661,16 +805,8 @@
     pointer-events: auto;
   }
 
-  .left-aux-row {
-    display: flex;
-    gap: 8px;
-  }
-
-  .left-main-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-  }
+  .left-aux-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .left-main-row { display: flex; align-items: flex-end; gap: 10px; }
 
   #moveRocker {
     position: relative;
@@ -771,9 +907,14 @@
   .t-btn.pill {
     width: auto;
     height: 34px;
-    padding: 0 11px;
+    padding: 0 10px;
     border-radius: 99px;
     font-size: 9px;
+  }
+  .t-btn.pill.kiai-ready {
+    border-color: var(--crimson-hi);
+    background: rgba(200, 36, 36, 0.34);
+    box-shadow: 0 0 10px rgba(200, 36, 36, 0.38);
   }
   .t-btn.pressed {
     background: rgba(200, 36, 36, 0.5);
@@ -795,7 +936,7 @@
   .t-btn.dash { grid-column: 1; grid-row: 2; }
   .t-btn.guard { grid-column: 2; grid-row: 2; border-color: var(--crimson-hi); }
 
-  /* Portrait Rotate & Fullscreen Prompt */
+  /* Portrait Rotate + Fullscreen Overlay */
   #rotateOverlay {
     position: fixed;
     inset: 0;
@@ -841,9 +982,9 @@
 
   @media (max-height: 460px) {
     #menuLayer { flex-direction: row; align-items: center; gap: 16px; padding: 10px 16px; }
-    .menu-left { gap: 10px; }
-    .menu-btn { padding: 8px 12px; font-size: 13px; }
-    .weapon-card { padding: 11px; gap: 7px; }
+    .menu-left { gap: 8px; }
+    .menu-btn { padding: 7px 11px; font-size: 12px; }
+    .weapon-card { padding: 10px; gap: 6px; }
     #moveRocker { width: 154px; height: 60px; }
     .action-arc { grid-template-columns: 52px 54px 70px; grid-template-rows: 48px 48px; gap: 6px; }
     .t-btn { width: 50px; height: 50px; font-size: 9px; }
@@ -879,6 +1020,15 @@
     <canvas id="gameCanvas" width="1280" height="720"></canvas>
   </div>
 
+  <!-- KANJI CALLOUT TOAST -->
+  <div id="emoteToast" class="hidden" aria-live="polite">
+    <span id="emoteToastJp" class="emote-kanji">礼</span>
+    <div class="emote-meta">
+      <span id="emoteToastText">Respect</span>
+      <small id="emoteToastFrom">Opponent</small>
+    </div>
+  </div>
+
   <!-- IN-GAME TOP BAR -->
   <div id="topBar" class="hidden">
     <div class="hud-group">
@@ -889,6 +1039,18 @@
       <button id="btnFullscreen" class="mini-btn" type="button">FS</button>
       <button id="btnTopAction" class="mini-btn" type="button">Pause</button>
     </div>
+  </div>
+
+  <!-- LIVE DOJO PRACTICE TOOLBAR -->
+  <div id="practiceBar" class="hidden" aria-label="Dojo Practice Controls">
+    <button class="prac-btn" data-dummy="idle" type="button">Idle</button>
+    <button class="prac-btn" data-dummy="guard" type="button">Guard</button>
+    <button class="prac-btn active" data-dummy="attack" type="button">Attack</button>
+    <button class="prac-btn" data-dummy="parry" type="button">Parry</button>
+    <span class="prac-sep"></span>
+    <button id="btnPracKi" class="prac-btn active" type="button">Inf Ki: ON</button>
+    <button id="btnPracWep" class="prac-btn" type="button">Blade: Katana</button>
+    <button id="btnPracStage" class="prac-btn" type="button">Stage</button>
   </div>
 
   <!-- FILM-POSTER MAIN MENU -->
@@ -920,10 +1082,17 @@
           <span>Endless Dojo</span>
           <span class="tag">Ink Scrolls</span>
         </button>
-        <button id="btnLocal2P" class="menu-btn" type="button">
-          <span>Local 2P Duel</span>
-          <span class="tag">Best of 3</span>
+        <button id="btnPractice" class="menu-btn" type="button">
+          <span>Dojo Practice</span>
+          <span class="tag">Spar / Feint</span>
         </button>
+        <div class="nav-split">
+          <button id="btnLocal2P" class="menu-btn" type="button">
+            <span>Local 2P Duel</span>
+            <span id="localRuleTag" class="tag">BO3</span>
+          </button>
+          <button id="btnLocalRuleCycle" class="rule-cycle-btn" type="button" title="Cycle Local 2P Rule (BO3 / BO5 / One-Cut)">BO3 ↻</button>
+        </div>
         <button id="btnSettings" class="menu-btn" type="button">
           <span>Settings &amp; Controls</span>
           <span class="tag">Rebind PC</span>
@@ -999,7 +1168,7 @@
         </details>
       </div>
 
-      <div id="lobbyRoom" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+      <div id="lobbyRoom" class="hidden" style="display:flex;flex-direction:column;gap:11px;">
         <div class="room-top">
           <div>
             <div class="modal-sub">Room Code</div>
@@ -1036,8 +1205,17 @@
             <span class="modal-sub" style="margin:0;">Stage:</span>
             <div id="stagePills" class="stage-pills"></div>
           </div>
+        </div>
+
+        <div class="stage-row">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="modal-sub" style="margin:0;">Rules:</span>
+            <div id="rulePills" class="stage-pills"></div>
+          </div>
           <button id="btnReady" class="btn crimson" type="button" disabled>Ready</button>
         </div>
+
+        <div id="lobbyEmotes" class="emote-row"></div>
       </div>
     </div>
   </div>
@@ -1058,7 +1236,6 @@
         <button id="tabCtrl" class="mini-btn" type="button">PC Controls</button>
       </div>
 
-      <!-- Tab 1: General -->
       <div id="paneGen">
         <div class="set-row">
           <div>Volume (<span id="setVolLbl">70%</span>)<small>Procedural steel, parry &amp; sever audio</small></div>
@@ -1080,12 +1257,15 @@
           <div>Touch Controls<small>Show on-screen mobile controls</small></div>
           <button id="setTouch" class="mini-btn" type="button">Auto</button>
         </div>
-        <p style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px;">
-          Tip: Hold <strong style="color:var(--ink);">Down + Slash</strong> for a Low Leg Sweep, <strong style="color:var(--ink);">Up + Slash</strong> for a Rising Launcher, or stand still to sheathe your blade and build passive Ki.
+        <p style="font-size:11px;color:var(--muted);line-height:1.55;margin-top:12px;">
+          <strong style="color:var(--ink);">Combat Tech:</strong>
+          Hold <strong style="color:var(--ink);">Down + Slash</strong> for a Low Leg Sweep •
+          <strong style="color:var(--ink);">Up + Slash</strong> for a Rising Launcher •
+          Tap <strong style="color:var(--ink);">Guard during swing startup</strong> to <strong style="color:var(--crimson-hi);">Feint</strong> and bait parries •
+          Press <strong style="color:var(--ink);">Guard + Dash (25 Ki)</strong> for a <strong style="color:var(--crimson-hi);">Kiai</strong> escape burst.
         </p>
       </div>
 
-      <!-- Tab 2: Custom PC Keyboard + Mouse Rebinding -->
       <div id="paneCtrl" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span style="font-size:11px;color:var(--muted);">Click any slot, then press a key or mouse button (Esc cancels).</span>
@@ -1123,9 +1303,9 @@
     </div>
   </div>
 
-  <!-- RESULTS MODAL (WITH ONLINE REMATCH WEAPON SWAP) -->
+  <!-- RESULTS MODAL (WITH ONLINE REMATCH READY SYNC, RULE SWAP & KANJI CALLOUTS) -->
   <div id="resultModal" class="modal-backdrop hidden">
-    <div class="modal-card" style="max-width:460px;text-align:center;">
+    <div class="modal-card" style="max-width:480px;text-align:center;">
       <div id="resKicker" class="modal-sub" style="color:var(--crimson-hi);">MATCH COMPLETE</div>
       <h2 id="resTitle" class="modal-title">VICTORY</h2>
       <p id="resSub" style="font-size:12px;color:var(--muted);"></p>
@@ -1133,10 +1313,20 @@
 
       <div id="rematchSwapWrap" class="rematch-swap hidden">
         <div id="rmSwapTitle" class="modal-sub" style="margin:0;">Swap Blade for Rematch</div>
-        <div id="rmSwapGrid" class="mini-grid" style="grid-template-columns:repeat(4,1fr);"></div>
+        <div id="rmSwapGrid" class="mini-grid" style="grid-template-columns:repeat(auto-fit,minmax(84px,1fr));"></div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;">
+          <span class="modal-sub" style="margin:0;">Rule:</span>
+          <div id="rmRulePills" class="stage-pills"></div>
+        </div>
+        <div class="rm-ready-row">
+          <span id="rmHostStatus" class="slot-wait">Host: Picking...</span>
+          <span id="rmGuestStatus" class="slot-wait">Guest: Picking...</span>
+        </div>
       </div>
 
-      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:4px;">
+      <div id="resEmotes" class="emote-row hidden"></div>
+
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:2px;">
         <button id="btnRematch" class="btn crimson" type="button">Rematch</button>
         <button id="btnResultMenu" class="btn" type="button">Main Menu</button>
       </div>
@@ -1148,6 +1338,7 @@
     <div class="touch-left">
       <div class="left-aux-row">
         <button class="t-btn pill" data-btn="down" type="button">↓ Low Sweep</button>
+        <button id="tbKiai" class="t-btn pill" data-btn="kiai" type="button">Kiai 25</button>
         <button class="t-btn pill" data-btn="taunt" type="button">Sheathe</button>
       </div>
       <div class="left-main-row">
@@ -1215,15 +1406,25 @@
       }
 
       const $ = (id) => document.getElementById(id);
+
+      const RULES = [
+        { id: 'bo3', label: 'BO3', short: 'BO3' },
+        { id: 'bo5', label: 'BO5', short: 'BO5' },
+        { id: 'onecut', label: 'One-Cut', short: '1-CUT' },
+      ];
+
       let currentMode = 'menu';
       let selectedWeapon = 0;
+      let localRuleIdx = 0;
       let touchPref = 'auto';
       let onlineResMeta = null;
+      let emoteTimer = null;
 
       const lobby = {
         p1Wep: 0,
         p2Wep: 0,
         stage: 0,
+        rule: 'bo3',
         p1Ready: false,
         p2Ready: false,
         inMatch: false,
@@ -1265,6 +1466,88 @@
         el.className = 'alert-box ' + (kind || '');
         show(el, true);
       }
+
+      function showEmoteToast(ev) {
+        $('emoteToastJp').textContent = ev.jp || '礼';
+        $('emoteToastText').textContent = ev.label || '';
+        $('emoteToastFrom').textContent = ev.self ? 'You' : (ev.fromRole === 'host' ? 'Host (P1)' : 'Guest (P2)');
+        show($('emoteToast'), true);
+        clearTimeout(emoteTimer);
+        emoteTimer = setTimeout(() => show($('emoteToast'), false), 2200);
+      }
+
+      function buildEmoteButtons(container) {
+        container.innerHTML = '';
+        Object.entries(KuroGame.EMOTES || {}).forEach(([code, em]) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'emote-btn';
+          b.innerHTML = `<span>${em.jp}</span>${em.label}`;
+          b.addEventListener('click', () => KuroGame.sendOnlineEmote(code));
+          container.appendChild(b);
+        });
+      }
+
+      function buildRulePills(container, activeRule, canEdit, onPick) {
+        container.innerHTML = '';
+        RULES.forEach((r) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'chip-btn' + (r.id === activeRule ? ' active' : '');
+          b.textContent = r.label;
+          b.disabled = !canEdit;
+          b.addEventListener('click', () => onPick(r.id));
+          container.appendChild(b);
+        });
+      }
+
+      function refreshLocalRuleUi() {
+        const r = RULES[localRuleIdx];
+        $('localRuleTag').textContent = r.short;
+        $('btnLocalRuleCycle').textContent = r.short + ' ↻';
+        $('btnLocalRuleCycle').classList.toggle('onecut', r.id === 'onecut');
+      }
+
+      /* ==================== DOJO PRACTICE TOOLBAR ==================== */
+      function syncPracticeBar() {
+        const cfg = KuroGame.getPracticeConfig();
+        document.querySelectorAll('#practiceBar [data-dummy]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.dummy === cfg.dummyMode);
+        });
+        $('btnPracKi').textContent = 'Inf Ki: ' + (cfg.infKi ? 'ON' : 'OFF');
+        $('btnPracKi').classList.toggle('active', cfg.infKi);
+        $('btnPracWep').textContent = 'Blade: ' + KuroWeapons.get(cfg.weaponIdx).name;
+        const st = KuroWeapons.STAGES[cfg.stageIdx] || KuroWeapons.STAGES[0];
+        $('btnPracStage').textContent = st.name;
+      }
+
+      document.querySelectorAll('#practiceBar [data-dummy]').forEach((b) => {
+        b.addEventListener('click', () => {
+          KuroGame.setPracticeConfig({ dummyMode: b.dataset.dummy });
+          syncPracticeBar();
+        });
+      });
+
+      $('btnPracKi').addEventListener('click', () => {
+        const cur = KuroGame.getPracticeConfig();
+        KuroGame.setPracticeConfig({ infKi: !cur.infKi });
+        syncPracticeBar();
+      });
+
+      $('btnPracWep').addEventListener('click', () => {
+        const cur = KuroGame.getPracticeConfig();
+        const next = (cur.weaponIdx + 1) % KuroWeapons.WEAPONS.length;
+        selectedWeapon = next;
+        KuroGame.setPracticeConfig({ weaponIdx: next });
+        syncPracticeBar();
+      });
+
+      $('btnPracStage').addEventListener('click', () => {
+        const cur = KuroGame.getPracticeConfig();
+        const next = (cur.stageIdx + 1) % KuroWeapons.STAGES.length;
+        KuroGame.setPracticeConfig({ stageIdx: next });
+        syncPracticeBar();
+      });
 
       /* ==================== WEAPON SELECTOR (MENU) ==================== */
       function renderMenuWeapons() {
@@ -1350,13 +1633,13 @@
         });
       }
 
-      /* ==================== ONLINE LOBBY ==================== */
+      /* ==================== ONLINE LOBBY & REMATCH SYNC ==================== */
       function sendMyLobbyState() {
         const net = KuroNet.getState();
         if (!net.code || !net.role) return;
         const myWep = net.role === 'host' ? lobby.p1Wep : lobby.p2Wep;
         const myReady = net.role === 'host' ? lobby.p1Ready : lobby.p2Ready;
-        KuroNet.sendReliable(['lb', net.role, myWep, lobby.stage, myReady ? 1 : 0]);
+        KuroNet.sendReliable(['lb', net.role, myWep, lobby.stage, myReady ? 1 : 0, lobby.rule]);
       }
 
       function maybeLaunchOnlineMatch() {
@@ -1364,10 +1647,17 @@
         if (net.role !== 'host' || !net.peerPresent || lobby.inMatch) return;
         if (lobby.p1Ready && lobby.p2Ready) {
           lobby.inMatch = true;
-          KuroNet.sendReliable(['go', lobby.p1Wep, lobby.p2Wep, lobby.stage]);
+          KuroNet.sendReliable(['go', lobby.p1Wep, lobby.p2Wep, lobby.stage, lobby.rule]);
           show($('onlineModal'), false);
           maybeMobileFullscreen();
-          KuroGame.startOnline({ role: 'host', p1Weapon: lobby.p1Wep, p2Weapon: lobby.p2Wep, stageIdx: lobby.stage });
+          KuroGame.startOnline({
+            role: 'host',
+            p1Weapon: lobby.p1Wep,
+            p2Weapon: lobby.p2Wep,
+            stageIdx: lobby.stage,
+            rule: lobby.rule,
+            resetSession: true,
+          });
         }
       }
 
@@ -1438,10 +1728,19 @@
           b.addEventListener('click', () => {
             if (!isHost) return;
             lobby.stage = idx;
+            lobby.p1Ready = false;
             sendMyLobbyState();
             renderLobbyRoom();
           });
           stageWrap.appendChild(b);
+        });
+
+        buildRulePills($('rulePills'), lobby.rule, isHost, (rId) => {
+          if (!isHost) return;
+          lobby.rule = rId;
+          lobby.p1Ready = false;
+          sendMyLobbyState();
+          renderLobbyRoom();
         });
 
         const myReady = isHost ? lobby.p1Ready : lobby.p2Ready;
@@ -1450,15 +1749,23 @@
         readyBtn.textContent = !net.peerPresent ? 'Waiting for Opponent...' : myReady ? 'Cancel Ready' : 'Ready to Duel';
       }
 
-      function renderRematchWeaponSwap() {
+      function renderRematchControls() {
         const wrap = $('rematchSwapWrap');
+        const emRow = $('resEmotes');
+        const rmBtn = $('btnRematch');
+
         if (!onlineResMeta || currentMode !== 'online') {
           show(wrap, false);
+          show(emRow, false);
+          rmBtn.textContent = 'Rematch';
           return;
         }
+
         show(wrap, true);
-        const myIdx = onlineResMeta.role === 'host' ? onlineResMeta.p1Weapon : onlineResMeta.p2Weapon;
-        const opIdx = onlineResMeta.role === 'host' ? onlineResMeta.p2Weapon : onlineResMeta.p1Weapon;
+        show(emRow, true);
+        const isHost = onlineResMeta.role === 'host';
+        const myIdx = isHost ? onlineResMeta.p1Weapon : onlineResMeta.p2Weapon;
+        const opIdx = isHost ? onlineResMeta.p2Weapon : onlineResMeta.p1Weapon;
         $('rmSwapTitle').textContent = `Your Blade (Opponent: ${KuroWeapons.get(opIdx).name})`;
 
         const grid = $('rmSwapGrid');
@@ -1468,14 +1775,23 @@
           b.type = 'button';
           b.className = 'chip-btn' + (idx === myIdx ? ' active' : '');
           b.textContent = w.name;
-          b.addEventListener('click', () => {
-            if (onlineResMeta.role === 'host') onlineResMeta.p1Weapon = idx;
-            else onlineResMeta.p2Weapon = idx;
-            KuroGame.setOnlineRematchWeapon(idx);
-            renderRematchWeaponSwap();
-          });
+          b.addEventListener('click', () => KuroGame.setOnlineRematchWeapon(idx));
           grid.appendChild(b);
         });
+
+        buildRulePills($('rmRulePills'), onlineResMeta.rule || 'bo3', isHost, (rId) => {
+          KuroGame.setOnlineRematchRule(rId);
+        });
+
+        const hSt = $('rmHostStatus');
+        const gSt = $('rmGuestStatus');
+        hSt.textContent = onlineResMeta.rmReadyHost ? 'Host: READY ✓' : 'Host: Picking...';
+        hSt.className = onlineResMeta.rmReadyHost ? 'slot-ready' : 'slot-wait';
+        gSt.textContent = onlineResMeta.rmReadyGuest ? 'Guest: READY ✓' : 'Guest: Picking...';
+        gSt.className = onlineResMeta.rmReadyGuest ? 'slot-ready' : 'slot-wait';
+
+        const myReady = isHost ? onlineResMeta.rmReadyHost : onlineResMeta.rmReadyGuest;
+        rmBtn.textContent = myReady ? 'Waiting for Opponent (Cancel)' : 'Ready for Rematch';
       }
 
       /* ==================== NET EVENTS ==================== */
@@ -1495,6 +1811,7 @@
         lobby.p1Ready = false;
         lobby.p2Ready = false;
         lobby.inMatch = false;
+        KuroGame.resetOnlineSession();
         if (st.role === 'host') lobby.p1Wep = selectedWeapon;
         else lobby.p2Wep = selectedWeapon;
         renderLobbyRoom();
@@ -1508,6 +1825,7 @@
         } else if (ev.type === 'left') {
           lobby.p1Ready = false;
           lobby.p2Ready = false;
+          KuroGame.resetOnlineSession();
           if (lobby.inMatch && currentMode === 'online') {
             lobby.inMatch = false;
             show($('resultModal'), false);
@@ -1529,7 +1847,9 @@
           currentMode = nextMode;
           show($('menuLayer'), nextMode === 'menu');
           show($('topBar'), nextMode !== 'menu');
+          show($('practiceBar'), nextMode === 'practice');
           $('btnTopAction').textContent = nextMode === 'online' ? 'Leave' : 'Pause';
+          if (nextMode === 'practice') syncPracticeBar();
           if (nextMode === 'menu') {
             lobby.inMatch = false;
             onlineResMeta = null;
@@ -1576,8 +1896,19 @@
             d.innerHTML = `<span>${k}</span><strong>${v}</strong>`;
             wrap.appendChild(d);
           });
-          onlineResMeta = res.mode === 'online' ? { role: res.role, p1Weapon: res.p1Weapon, p2Weapon: res.p2Weapon } : null;
-          renderRematchWeaponSwap();
+          onlineResMeta =
+            res.mode === 'online'
+              ? {
+                  role: res.role,
+                  p1Weapon: res.p1Weapon,
+                  p2Weapon: res.p2Weapon,
+                  rule: res.rule || 'bo3',
+                  rmReadyHost: Boolean(res.rmReadyHost),
+                  rmReadyGuest: Boolean(res.rmReadyGuest),
+                  sessionWins: res.sessionWins || [0, 0],
+                }
+              : null;
+          renderRematchControls();
           show($('btnRematch'), Boolean(res.canRematch));
           show($('resultModal'), true);
         },
@@ -1585,11 +1916,12 @@
         onOnlineLobbyMsg(payload) {
           const tag = payload[0];
           if (tag === 'lb') {
-            const [, role, wep, stg, rdy] = payload;
+            const [, role, wep, stg, rdy, rule] = payload;
             if (role === 'host') {
               lobby.p1Wep = wep || 0;
               lobby.stage = stg || 0;
               lobby.p1Ready = Boolean(rdy);
+              if (rule) lobby.rule = rule;
             } else {
               lobby.p2Wep = wep || 0;
               lobby.p2Ready = Boolean(rdy);
@@ -1597,33 +1929,43 @@
             renderLobbyRoom();
             maybeLaunchOnlineMatch();
           } else if (tag === 'go') {
-            const [, w1, w2, stg] = payload;
+            const [, w1, w2, stg, rule] = payload;
             lobby.p1Wep = w1 || 0;
             lobby.p2Wep = w2 || 0;
             lobby.stage = stg || 0;
+            if (rule) lobby.rule = rule;
             lobby.inMatch = true;
             show($('onlineModal'), false);
             maybeMobileFullscreen();
-            KuroGame.startOnline({ role: KuroNet.getState().role, p1Weapon: lobby.p1Wep, p2Weapon: lobby.p2Wep, stageIdx: lobby.stage });
+            KuroGame.startOnline({
+              role: KuroNet.getState().role,
+              p1Weapon: lobby.p1Wep,
+              p2Weapon: lobby.p2Wep,
+              stageIdx: lobby.stage,
+              rule: lobby.rule,
+              resetSession: true,
+            });
           }
         },
 
-        onRematchWeaponSync(w1, w2) {
-          if (onlineResMeta) {
-            onlineResMeta.p1Weapon = w1;
-            onlineResMeta.p2Weapon = w2;
-            renderRematchWeaponSwap();
-          }
+        onRematchState(st) {
+          onlineResMeta = st;
+          renderRematchControls();
         },
 
         onRematchStarted() {
           show($('resultModal'), false);
         },
 
+        onOnlineEmote(ev) {
+          showEmoteToast(ev);
+        },
+
         onSkillState(s) {
           $('tbQ').classList.toggle('ready', s.qReady);
           $('tbE').classList.toggle('ready', s.eReady);
           $('tbR').classList.toggle('ready', s.rReady);
+          $('tbKiai').classList.toggle('kiai-ready', Boolean(s.kiaiReady));
           if (s.qShort) $('tbQName').textContent = s.qShort;
           if (s.eShort) $('tbEName').textContent = s.eShort;
           if (s.rShort) $('tbRName').textContent = s.rShort;
@@ -1653,7 +1995,17 @@
 
       $('btnStory').addEventListener('click', () => { maybeMobileFullscreen(); KuroGame.startStory(); });
       $('btnEndless').addEventListener('click', () => { maybeMobileFullscreen(); KuroGame.startEndless(); });
-      $('btnLocal2P').addEventListener('click', () => { maybeMobileFullscreen(); KuroGame.startLocal2P(); });
+      $('btnPractice').addEventListener('click', () => { maybeMobileFullscreen(); KuroGame.startPractice(); });
+      $('btnLocal2P').addEventListener('click', () => {
+        maybeMobileFullscreen();
+        KuroGame.startLocal2P(RULES[localRuleIdx].id);
+      });
+      $('btnLocalRuleCycle').addEventListener('click', () => {
+        KuroGame.unlockAudio();
+        KuroGame.playMenuDraw();
+        localRuleIdx = (localRuleIdx + 1) % RULES.length;
+        refreshLocalRuleUi();
+      });
 
       $('btnOnline').addEventListener('click', () => {
         KuroGame.unlockAudio();
@@ -1707,7 +2059,11 @@
           prompt('Copy invite link:', url);
         }
       });
-      $('btnLeaveRoom').addEventListener('click', () => { KuroNet.leaveRoom(); renderLobbyRoom(); });
+      $('btnLeaveRoom').addEventListener('click', () => {
+        KuroGame.resetOnlineSession();
+        KuroNet.leaveRoom();
+        renderLobbyRoom();
+      });
       $('btnReady').addEventListener('click', () => {
         const net = KuroNet.getState();
         if (!net.peerPresent) return;
@@ -1784,18 +2140,33 @@
       /* Top Bar, Pause, Results & Rotate */
       $('btnFullscreen').addEventListener('click', () => KuroControls.toggleFullscreen());
       $('btnTopAction').addEventListener('click', () => {
-        if (currentMode === 'online') { KuroNet.leaveRoom(); KuroGame.returnToMenu(); }
-        else KuroGame.togglePause();
+        if (currentMode === 'online') {
+          KuroGame.resetOnlineSession();
+          KuroNet.leaveRoom();
+          KuroGame.returnToMenu();
+        } else {
+          KuroGame.togglePause();
+        }
       });
       $('btnResume').addEventListener('click', () => KuroGame.togglePause(false));
       $('btnRestart').addEventListener('click', () => { show($('pauseModal'), false); KuroGame.requestRematch(); });
       $('btnPauseSettings').addEventListener('click', () => { syncSettingsUi(); setSettingsTab('ctrl'); show($('settingsBackdrop'), true); });
       $('btnPauseMenu').addEventListener('click', () => { show($('pauseModal'), false); KuroGame.returnToMenu(); });
 
-      $('btnRematch').addEventListener('click', () => { show($('resultModal'), false); KuroGame.requestRematch(); });
+      $('btnRematch').addEventListener('click', () => {
+        if (currentMode === 'online') {
+          KuroGame.toggleOnlineRematchReady();
+        } else {
+          show($('resultModal'), false);
+          KuroGame.requestRematch();
+        }
+      });
       $('btnResultMenu').addEventListener('click', () => {
         show($('resultModal'), false);
-        if (currentMode === 'online') KuroNet.leaveRoom();
+        if (currentMode === 'online') {
+          KuroGame.resetOnlineSession();
+          KuroNet.leaveRoom();
+        }
         KuroGame.returnToMenu();
       });
 
@@ -1870,7 +2241,10 @@
       });
 
       /* ==================== BOOT ==================== */
+      buildEmoteButtons($('lobbyEmotes'));
+      buildEmoteButtons($('resEmotes'));
       refreshBest();
+      refreshLocalRuleUi();
       renderMenuWeapons();
       syncSettingsUi();
 
