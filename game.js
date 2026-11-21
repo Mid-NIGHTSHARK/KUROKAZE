@@ -1,4 +1,6 @@
-/* KUROKAZE IV — Modular Core Engine (Step 5 of 6)
+/* KUROKAZE IV — Modular Core Engine (v2 — Combat Polish & Animation Flow)
+ * 120ms input buffer, hit-cancels, true startup/active/recovery frames,
+ * Counter-Hits, 3-phase pose evaluation, landing squash, guard recoil & dynamic duel cam.
  * Orchestrates KuroControls, KuroWeapons, KuroFX, KuroRender, and KuroNet.
  */
 (function (global) {
@@ -8,6 +10,7 @@
   const LEFT_B = -640;
   const RIGHT_B = 640;
   const GRAV = 2250;
+  const BUFFER_SEC = 0.125;
   const BEST_KEY = 'kurokaze_iv_best_v1';
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -34,11 +37,11 @@
     muted: false,
     grain: !(global.KuroControls && KuroControls.IS_TOUCH),
     letterbox: true,
-    perfMode: 'auto', // auto | high | low
+    perfMode: 'auto',
   };
 
-  let mode = 'menu'; // menu | story | endless | local2p | online
-  let state = 'MENU'; // MENU | BANNER | STANDOFF | PLAYING | CLASH | ULT | SCROLL | PAUSED | VICTORY | GAMEOVER
+  let mode = 'menu';
+  let state = 'MENU';
   let stageIdx = 2;
   let menuWeaponIdx = 0;
   let selectedStageIdx = 0;
@@ -71,7 +74,6 @@
   let clones = [];
   let menuFighters = [];
 
-  // Online Local-Prediction & Rematch Swap State
   const netState = {
     active: false,
     role: 'host',
@@ -84,7 +86,6 @@
     koSent: false,
   };
 
-  // Telemetry
   let fpsFrames = 0;
   let fpsAccum = 0;
   let currentFps = 60;
@@ -137,6 +138,52 @@
     return (KuroWeapons.STAGES[stageIdx] || KuroWeapons.STAGES[0]).id;
   }
 
+  function makeInputBuffer() {
+    return {
+      atk: 0,
+      atkUp: false,
+      atkDown: false,
+      dash: 0,
+      parry: 0,
+      jump: 0,
+      q: 0,
+      e: 0,
+      rSkill: 0,
+      taunt: 0,
+    };
+  }
+
+  function feedBuffer(f, inp, rdt) {
+    const b = f.buf;
+    b.atk = Math.max(0, b.atk - rdt);
+    b.dash = Math.max(0, b.dash - rdt);
+    b.parry = Math.max(0, b.parry - rdt);
+    b.jump = Math.max(0, b.jump - rdt);
+    b.q = Math.max(0, b.q - rdt);
+    b.e = Math.max(0, b.e - rdt);
+    b.rSkill = Math.max(0, b.rSkill - rdt);
+    b.taunt = Math.max(0, b.taunt - rdt);
+
+    if (!inp) return;
+    if (inp.atk) {
+      b.atk = BUFFER_SEC;
+      b.atkUp = Boolean(inp.up && !inp.jump);
+      b.atkDown = Boolean(inp.down);
+    }
+    if (inp.dash) b.dash = BUFFER_SEC;
+    if (inp.parryTap) b.parry = BUFFER_SEC;
+    if (inp.jump) b.jump = BUFFER_SEC;
+    if (inp.q) b.q = BUFFER_SEC;
+    if (inp.e) b.e = BUFFER_SEC;
+    if (inp.rSkill) b.rSkill = BUFFER_SEC;
+    if (inp.taunt) b.taunt = BUFFER_SEC;
+  }
+
+  function clearBuffer(f) {
+    if (!f || !f.buf) return;
+    f.buf = makeInputBuffer();
+  }
+
   /* ==================== FIGHTER FACTORY ==================== */
   let nextFid = 1;
   function makeFighter(cfg) {
@@ -175,10 +222,14 @@
       step: 0,
       comboWin: 0,
       activeMove: null,
-      moveKind: 0, // 0=combo 1=up 2=down 3=q 4=e
+      moveKind: 0,
+      didHit: false,
+      lungeApplied: false,
       hitSet: new Set(),
       parryW: 0,
       guarding: false,
+      guardRecoilT: 0,
+      landSquash: 0,
       dashCd: 0,
       invuln: 0,
       stagT: 0,
@@ -198,6 +249,7 @@
       scarf: sc,
       perks: new Set(cfg.perks || []),
       delays: [],
+      buf: makeInputBuffer(),
       phase: 1,
       aiCd: rand(0.4, 0.9),
       aiSpecial: rand(1.6, 2.8),
@@ -206,6 +258,8 @@
       deadT: 0,
       severed: false,
       isRemote: Boolean(cfg.isRemote),
+      _trail: [],
+      _trail2: [],
     };
   }
 
@@ -237,20 +291,48 @@
     }
   }
 
+  function isCounterVulnerable(def) {
+    if (!def || def.dead || def.stagT > 0 || def.execMark) return false;
+    if (def.act === 'windup') return true;
+    if (def.act === 'attack' || def.act === 'airSlash') {
+      const prg = 1 - def.actT / Math.max(0.01, def.actD);
+      const mv = def.activeMove;
+      const st = mv && mv.startup !== undefined ? mv.startup : 0.18;
+      const ae = mv && mv.activeEnd !== undefined ? mv.activeEnd : 0.58;
+      // Startup interrupt or whiff-punish during recovery
+      if (prg < st) return true;
+      if (!def.didHit && prg > ae) return true;
+    }
+    if ((def.act === 'skillQ' || def.act === 'skillE') && def.skillStage === 0) {
+      const prg = 1 - def.actT / Math.max(0.01, def.actD);
+      if (prg < 0.35) return true;
+    }
+    return false;
+  }
+
+  function getMoveForRemote(f) {
+    const W = KuroWeapons.get(f.weaponIdx);
+    if (f.act === 'airSlash') return W.airAttack;
+    if (f.moveKind === 1) return W.upAttack;
+    if (f.moveKind === 2) return W.downAttack;
+    const idx = clamp((f.step || 1) - 1, 0, W.combo.length - 1);
+    return W.combo[idx] || W.combo[0];
+  }
+
   /* ==================== PRE-FINAL-BLOW SLOW MOTION ==================== */
   function checkKillAnticipation(attacker, move) {
     if (mode === 'online' || killSlowCd > 0 || !move || attacker.role !== 'player') return;
     const foes = fighters.filter((o) => o.team !== attacker.team && !o.dead);
-    if (foes.length !== 1) return; // Last enemy in wave, Boss, or Duel opponent
+    if (foes.length !== 1) return;
     const tgt = foes[0];
-    const isDuel = mode === 'local2p';
-    if (isDuel && rounds[attacker.team === 1 ? 0 : 1] < 1) return; // Match point only in local 2P
+    if (mode === 'local2p' && rounds[attacker.team === 1 ? 0 : 1] < 1) return;
 
-    const reach = (move.reach || 115) + 46;
+    const reach = (move.reach || 115) + 48;
     const dx = (tgt.x - attacker.x) * attacker.f;
     if (dx < -25 || dx > reach || Math.abs(tgt.y - attacker.y) > 105) return;
 
-    const estDmg = tgt.execMark ? 999 : (move.dmg || 16) * (tgt.stagT > 0 ? 2 : 1);
+    const counterMul = isCounterVulnerable(tgt) ? 1.2 : 1.0;
+    const estDmg = tgt.execMark ? 999 : (move.dmg || 16) * (tgt.stagT > 0 ? 2 : counterMul);
     if (tgt.hp <= estDmg) {
       killSlowCd = 2.6;
       KuroFX.screen.slowT = Math.max(KuroFX.screen.slowT, 0.24);
@@ -341,6 +423,7 @@
       f.sheathed = true;
       f.act = 'taunt';
       f.vx = 0;
+      clearBuffer(f);
     });
     KuroFX.screen.targetZoom = 1.18;
     KuroFX.SFX.play('standoff');
@@ -357,6 +440,7 @@
       f.sheathed = false;
       f.act = 'idle';
       f.actT = 0;
+      clearBuffer(f);
     });
 
     if (earlySide) {
@@ -365,7 +449,7 @@
         bad.act = 'stagger';
         bad.stagT = bad.actT = bad.actD = 0.75;
         bad.pos = Math.min(bad.maxPos - 1, bad.pos + 30);
-        applyLocalTxt(bad.x, bad.y - 120, 'TOO EARLY!', '#e03131', 1.2);
+        KuroFX.applyEvent({ k: 'txt', x: bad.x, y: bad.y - 120, txt: 'TOO EARLY!', c: '#e03131', sc: 1.2 });
       }
       KuroFX.SFX.play('guard');
       return;
@@ -380,7 +464,7 @@
       win.f = dir;
       win.scarf.reset(win.x, win.y - 78);
       emitEvent({ k: 'cut', x1: win.x - 140, y1: GROUND - 55, x2: lose.x + 140, y2: GROUND - 55, c: '#f2eee5', w: 14, l: 0.45, sfx: 'heavy', inv: 0.08, shake: 14 }, false);
-      applyLocalTxt(win.x, win.y - 125, 'FIRST DRAW! +20 KI', '#e03131', 1.25);
+      KuroFX.applyEvent({ k: 'txt', x: win.x, y: win.y - 125, txt: 'FIRST DRAW! +20 KI', c: '#e03131', sc: 1.25 });
       if (!lose.isRemote) {
         lose.pos = Math.min(lose.maxPos - 1, lose.pos + 28);
         lose.hp = Math.max(1, lose.hp - 12);
@@ -391,15 +475,10 @@
     }
   }
 
-  function applyLocalTxt(x, y, txt, c, sc) {
-    KuroFX.applyEvent({ k: 'txt', x, y, txt, c, sc });
-  }
-
   /* ==================== COMBAT RESOLUTION ==================== */
   function deliverStrike(atk, def, dmg, posDmg, dir, opts = {}) {
     if (!def || def.dead) return;
 
-    // Online: attacker sends hit claim to defender for 0ms defender-validated parries/evades
     if (netState.active && atk && !atk.isRemote && def.isRemote) {
       const hitId = ++netState.localHitSeq;
       const hy = Math.round(def.y - 54 * def.scale);
@@ -427,6 +506,8 @@
         cutType,
         opts.lift || 0,
         opts.bleed || 0,
+        Math.round(opts.kb || 0),
+        Math.round((opts.hitstop || 0) * 1000),
       ]);
       return;
     }
@@ -450,6 +531,8 @@
       cutType = 'waist',
       lift = 0,
       bleed = 0,
+      kb = 0,
+      hitstop: moveHitstop = 0,
     } = opts;
     const hy = def.y - 54 * def.scale;
 
@@ -463,6 +546,7 @@
       def.flashT = 0.2;
       const heal = 15 + (atk && atk.perks.has('drain') ? 12 : 0);
       if (atk && !atk.dead) {
+        atk.didHit = true;
         atk.hp = Math.min(atk.maxHp, atk.hp + heal);
         grantHit(atk, 320, 18);
       }
@@ -519,14 +603,17 @@
       return { outcome: 'parry' };
     }
 
-    // Standard Guard
+    // Standard Guard (with recoil animation & dust)
     if (def.guarding && !unblockable) {
+      if (atk) atk.didHit = true;
+      def.guardRecoilT = heavy || guardCrush ? 0.22 : 0.14;
       def.pos = Math.min(def.maxPos, def.pos + (guardCrush ? posDmg * 1.5 : posDmg * 0.7));
       const chip = Math.max(2, Math.round(dmg * 0.22));
       def.hp = Math.max(0, def.hp - chip);
-      def.vx = dir * 220;
+      def.vx = dir * (kb ? Math.max(160, kb * 0.75) : 220);
       def.ki = clamp(def.ki + 5, 0, def.maxKi);
-      KuroFX.applyEvent({ k: 'sparks', x: def.x + def.f * 20, y: hy, dir: -dir, n: 10, sfx: 'guard', shake: 6 });
+      KuroFX.applyEvent({ k: 'sparks', x: def.x + def.f * 20, y: hy, dir: -dir, n: 10, sfx: 'guard', shake: heavy ? 8 : 5 });
+      KuroFX.spawnLandDust(def.x, heavy ? 0.85 : 0.55, -dir);
       let broken = false;
       if (def.pos >= def.maxPos) {
         breakPosture(def, dir);
@@ -538,50 +625,62 @@
       return { outcome: 'guard', broken, dead: def.dead };
     }
 
-    // Direct Hit
-    const finD = Math.round(dmg * (def.stagT > 0 ? 2 : 1));
+    // Direct Hit (with Counter-Hit detection!)
+    const isCounter = !isProj && isCounterVulnerable(def);
+    const dmgMul = def.stagT > 0 ? 2.0 : isCounter ? 1.2 : 1.0;
+    const posMul = isCounter ? 1.35 : 1.0;
+    const finD = Math.round(dmg * dmgMul);
+    const finPos = Math.round(posDmg * posMul);
+
     def.hp = Math.max(0, def.hp - finD);
-    def.pos = Math.min(def.maxPos, def.pos + posDmg);
-    def.flashT = 0.14;
+    def.pos = Math.min(def.maxPos, def.pos + finPos);
+    def.flashT = isCounter ? 0.19 : 0.14;
     if (bleed > 0) {
       def.bleedT = Math.min(4.5, def.bleedT + 2.2);
       def.bleedAtk = atk;
     }
-    if (atk) grantHit(atk, heavy ? 120 : 65, grantKi ? (heavy ? 12 : 7) : 0);
+    if (atk) {
+      atk.didHit = true;
+      grantHit(atk, (heavy ? 120 : 65) * (isCounter ? 1.35 : 1), grantKi ? (heavy ? 12 : 7) + (isCounter ? 5 : 0) : 0);
+    }
     if (def.team === 1 && (mode === 'story' || mode === 'endless')) {
       combo = 0;
       flow = Math.max(0, flow - 45);
     }
 
-    KuroFX.applyEvent({
-      k: 'sparks',
-      x: def.x,
-      y: hy,
-      dir,
-      n: heavy ? 16 : 9,
-      redP: heavy ? 0.55 : 0.25,
-      sfx: heavy ? 'heavyHit' : 'hit',
-      hitstop: heavy ? 0.07 : 0.042,
-      shake: heavy ? 12 : 6,
-      dx: dir * (heavy ? 10 : 5),
-      vibe: heavy ? 25 : 12,
-    });
-    KuroFX.applyEvent({ k: 'ink', x: def.x, y: hy, dir, n: heavy ? 16 : 10, big: def.hp <= 0 });
+    if (isCounter) {
+      KuroFX.spawnCounterBurst(def.x, hy, dir);
+    } else {
+      const hs = moveHitstop || (heavy ? 0.068 : 0.042);
+      KuroFX.applyEvent({
+        k: 'sparks',
+        x: def.x,
+        y: hy,
+        dir,
+        n: heavy ? 16 : 9,
+        redP: heavy ? 0.55 : 0.25,
+        sfx: heavy ? 'heavyHit' : 'hit',
+        hitstop: hs,
+        shake: heavy ? 12 : 6,
+        dx: dir * (heavy ? 10 : 5),
+        vibe: heavy ? 25 : 12,
+      });
+    }
+    KuroFX.applyEvent({ k: 'ink', x: def.x, y: hy, dir, n: heavy || isCounter ? 18 : 10, big: def.hp <= 0 || isCounter });
     KuroFX.applyEvent({
       k: 'txt',
       x: def.x + rand(-14, 14),
       y: hy - 34,
-      txt: `-${finD}${def.stagT > 0 ? '!' : ''}`,
-      c: heavy || unblockable || def.stagT > 0 ? '#e03131' : '#f2eee5',
-      sc: heavy || def.stagT > 0 ? 1.2 : 0.95,
+      txt: `-${finD}${def.stagT > 0 || isCounter ? '!' : ''}`,
+      c: heavy || unblockable || def.stagT > 0 || isCounter ? '#e03131' : '#f2eee5',
+      sc: heavy || def.stagT > 0 || isCounter ? 1.22 : 0.95,
     });
 
     if (def.hp <= 0) {
       killFighter(def, atk, dir, cutType);
-      return { outcome: 'hit', dmg: finD, dead: true };
+      return { outcome: 'hit', dmg: finD, dead: true, counter: isCounter };
     }
 
-    // Boss Phase 2
     if (def.role === 'boss' && def.phase === 1 && def.hp <= def.maxHp * 0.5) {
       def.phase = 2;
       def.spd = 340;
@@ -590,24 +689,27 @@
       def.vx = -dir * 260;
       KuroFX.applyEvent({ k: 'ring', x: def.x, y: hy, mr: 230, c: '#e03131', lw: 8, sfx: 'taiko', inv: 0.14, flash: '#c82424', flashA: 0.6, shake: 20 });
       KuroFX.applyEvent({ k: 'txt', x: def.x, y: def.y - 148, txt: 'DEMON AWAKENED', c: '#e03131', sc: 1.4 });
-      return { outcome: 'hit', dmg: finD };
+      return { outcome: 'hit', dmg: finD, counter: isCounter };
     }
 
     let broken = false;
     if (def.pos >= def.maxPos) {
       breakPosture(def, dir);
       broken = true;
-      return { outcome: 'hit', dmg: finD, broken: true };
+      return { outcome: 'hit', dmg: finD, broken: true, counter: isCounter };
     }
 
     const armor =
       (def.role === 'brute' || def.role === 'boss' || (def.activeMove && def.activeMove.armor)) &&
       !heavy &&
+      !isCounter &&
       def.stagT <= 0;
+
     if (!armor) {
       def.act = 'hurt';
-      def.actT = def.actD = heavy ? 0.3 : 0.21;
-      def.vx = dir * (heavy ? 320 : 175);
+      def.actT = def.actD = isCounter ? 0.34 : heavy ? 0.3 : 0.21;
+      const baseKb = kb || (heavy ? 320 : 175);
+      def.vx = dir * baseKb * (isCounter ? 1.22 : 1.0);
       if (lift < 0) {
         def.vy = lift;
         def.ground = false;
@@ -616,7 +718,7 @@
     } else {
       def.vx += dir * 60;
     }
-    return { outcome: 'hit', dmg: finD, broken };
+    return { outcome: 'hit', dmg: finD, broken, counter: isCounter };
   }
 
   function breakPosture(f, dir) {
@@ -639,6 +741,8 @@
     f.vx = dir * 340;
     f.vy = -190;
     f.execMark = false;
+    f._trail = [];
+    f._trail2 = [];
     if (f.team === 2 && (mode === 'story' || mode === 'endless')) kills++;
     if (atk && atk.perks.has('drain') && !atk.dead) atk.hp = Math.min(atk.maxHp, atk.hp + 12);
 
@@ -676,6 +780,7 @@
     f.ki -= sk.cost;
     f.sheathed = false;
     f.hitSet.clear();
+    f.didHit = false;
     f.skillStage = 0;
     f.moveKind = 3;
 
@@ -698,6 +803,7 @@
       f.actD = f.actT = sk.dur;
       f.vx = f.f * 520;
       f.activeMove = { pose: 'thrust', cutType: sk.cutType };
+      KuroFX.spawnLandDust(f.x, 0.85, f.f);
       emitEvent({ k: 'txt', x: f.x, y: f.y - 116, txt: 'DRAGON LUNGE', c: '#f2eee5', sc: 1.05, sfx: 'pole' });
     } else if (sk.id === 'shadow_blink') {
       const foes = fighters.filter((o) => o.team !== f.team && !o.dead);
@@ -712,6 +818,8 @@
         f.f = sgn(tgt.x - ex);
       }
       KuroFX.addGhost(KuroRender.buildSkel(sx, f.y, f.f, KuroRender.POSES.dash, f.scale), f.hat, true);
+      f._trail = [];
+      f._trail2 = [];
       f.x = ex;
       f.scarf.reset(ex, f.y - 78);
       f.act = 'skillQ';
@@ -723,7 +831,7 @@
       emitEvent({ k: 'txt', x: f.x, y: f.y - 116, txt: 'SHADOW BLINK', c: '#e03131', sc: 1.05 });
       KuroFX.sliceBambooAt(f.x, f.y - 70, 100, f.f, currentStageId());
       if (tgt && Math.abs(tgt.x - f.x) < 125) {
-        deliverStrike(f, tgt, sk.dmg, sk.pos, f.f, { heavy: true, cutType: sk.cutType, bleed: sk.bleed });
+        deliverStrike(f, tgt, sk.dmg, sk.pos, f.f, { heavy: true, cutType: sk.cutType, bleed: sk.bleed, kb: 220 });
       }
     }
   }
@@ -737,6 +845,7 @@
     f.ki -= sk.cost;
     f.sheathed = false;
     f.hitSet.clear();
+    f.didHit = false;
     f.skillStage = 0;
     f.moveKind = 4;
 
@@ -756,10 +865,11 @@
       emitEvent({ k: 'slash', x: f.x, y: f.y - 54, f: 1, r: sk.radius, a0: -3.1, a1: 3.1, red: true, w: 24, sfx: 'heavy', shake: 12 });
       emitEvent({ k: 'ring', x: f.x, y: f.y - 54, mr: sk.radius + 15, c: '#e03131', lw: 5 });
       emitEvent({ k: 'txt', x: f.x, y: f.y - 118, txt: 'WHIRLWIND CLEAVE', c: '#e03131', sc: 1.05 });
+      KuroFX.spawnLandDust(f.x, 1.0, 0);
       KuroFX.sliceBambooAt(f.x - sk.radius, f.y - 75, sk.radius * 2, 1, currentStageId());
       fighters.forEach((o) => {
         if (o.team !== f.team && !o.dead && Math.abs(o.x - f.x) <= sk.radius && Math.abs(o.y - f.y) <= 100) {
-          deliverStrike(f, o, sk.dmg, sk.pos, sgn(o.x - f.x), { heavy: true, guardCrush: true, cutType: sk.cutType });
+          deliverStrike(f, o, sk.dmg, sk.pos, sgn(o.x - f.x), { heavy: true, guardCrush: true, cutType: sk.cutType, kb: 340 });
         }
       });
     } else if (sk.id === 'pole_vault') {
@@ -770,6 +880,7 @@
       f.ground = false;
       f.invuln = 0.28;
       f.activeMove = { pose: 'vault', cutType: sk.cutType };
+      KuroFX.spawnLandDust(f.x, 0.9, f.f);
       emitEvent({ k: 'slash', x: f.x + f.f * 45, y: f.y - 62, f: f.f, r: 145, a0: -0.6, a1: 2.1, red: true, w: 20, sfx: 'pole', shake: 7 });
       emitEvent({ k: 'txt', x: f.x, y: f.y - 118, txt: 'POLE VAULT', c: '#f2eee5', sc: 1.05 });
       KuroFX.sliceBambooAt(f.x, f.y - 80, 150, f.f, currentStageId());
@@ -782,8 +893,7 @@
       f.activeMove = { pose: 'airSlash', cutType: sk.cutType };
       emitEvent({ sfx: 'kunai', shake: 4 });
       emitEvent({ k: 'txt', x: f.x, y: f.y - 115, txt: 'KUNAI STORM', c: '#f2eee5', sc: 1.0 });
-      const offsets = [-150, 0, 150];
-      offsets.forEach((vy) => {
+      [-150, 0, 150].forEach((vy) => {
         projs.push({
           k: 'kunai',
           team: f.team,
@@ -821,11 +931,12 @@
       if (sk.id === 'earthsplitter' && f.skillStage === 0 && prg >= 0.45) {
         f.skillStage = 1;
         emitEvent({ k: 'ring', x: f.x + f.f * 72, y: GROUND, mr: 155, c: '#e03131', lw: 7, sfx: 'heavyHit', shake: 15, vibe: 30 });
+        KuroFX.spawnLandDust(f.x + f.f * 72, 1.35, 0);
         KuroFX.spawnBladeScrape(f.x + f.f * 72, f.f);
         KuroFX.sliceBambooAt(f.x, GROUND - 80, 155, f.f, currentStageId());
         fighters.forEach((o) => {
           if (o.team !== f.team && !o.dead && Math.abs(o.x - (f.x + f.f * 78)) < 110 && Math.abs(o.y - f.y) < 95) {
-            deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: true, unblockable: true, cutType: sk.cutType });
+            deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: true, unblockable: true, cutType: sk.cutType, kb: 360 });
           }
         });
         projs.push({ k: 'shock', team: f.team, owner: f, x: f.x + f.f * 92, y: GROUND - 12, vx: f.f * 720, vy: 0, f: f.f, r: 34, dmg: sk.shockDmg, pos: 28, cutType: 'legs', hits: new Set(), l: 0.9 });
@@ -840,7 +951,7 @@
             if (o.team !== f.team && !o.dead) {
               const rel = (o.x - f.x) * f.f;
               if (rel >= -15 && rel <= sk.reach && Math.abs(o.y - f.y) < 90) {
-                deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: wanted === 3, cutType: wanted === 3 ? 'waist' : sk.cutType });
+                deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: wanted === 3, cutType: wanted === 3 ? 'waist' : sk.cutType, kb: wanted === 3 ? 320 : 120 });
               }
             }
           });
@@ -852,7 +963,7 @@
       fighters.forEach((o) => {
         if (o.team !== f.team && !o.dead && !f.hitSet.has(o.id) && Math.abs(o.x - f.x) < 130 && Math.abs(o.y - f.y) < 130) {
           f.hitSet.add(o.id);
-          deliverStrike(f, o, W.skillE.dmg, W.skillE.pos, f.f, { heavy: true, cutType: W.skillE.cutType });
+          deliverStrike(f, o, W.skillE.dmg, W.skillE.pos, f.f, { heavy: true, cutType: W.skillE.cutType, kb: 260 });
         }
       });
     }
@@ -865,8 +976,10 @@
     for (let i = 0; i < 6; i++) {
       KuroFX.addGhost(KuroRender.buildSkel(lerp(sx, ex, i / 6), f.y, f.f, KuroRender.POSES.dash, f.scale), f.hat, i === 5);
     }
+    f._trail = [];
     f.x = ex;
     f.scarf.reset(ex, f.y - 78);
+    KuroFX.spawnLandDust(sx, 0.9, f.f);
     KuroFX.sliceBambooAt(Math.min(sx, ex), ym, Math.abs(ex - sx), 1, currentStageId());
     emitEvent({ k: 'cut', x1: sx - f.f * 35, y1: ym, x2: ex + f.f * 35, y2: ym, c: '#f2eee5', w: 16, l: 0.5, sfx: 'heavy', inv: 0.08, shake: 15, vibe: 30 });
     emitEvent({ k: 'cut', x1: sx - f.f * 25, y1: ym + 4, x2: ex + f.f * 25, y2: ym + 4, c: '#c82424', w: 6, l: 0.42 });
@@ -875,7 +988,7 @@
     fighters.forEach((o) => {
       if (o.team !== f.team && !o.dead && o.x >= mn && o.x <= mx && Math.abs(o.y - f.y) < 120) {
         if (netState.active && o.isRemote) {
-          deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: true, grantKi: false, cutType: sk.cutType });
+          deliverStrike(f, o, sk.dmg, sk.pos, f.f, { heavy: true, grantKi: false, cutType: sk.cutType, kb: 260 });
         } else {
           o.vx = 0;
           o.act = 'hurt';
@@ -897,6 +1010,8 @@
     caster.sheathed = false;
     caster.invuln = 3.0;
     caster.vx = caster.vy = 0;
+    caster._trail = [];
+    caster._trail2 = [];
     state = 'ULT';
     KuroFX.applyEvent({ sfx: 'taiko', flash: '#c82424', flashA: 0.8, shake: 14, vibe: 40 });
     ult = {
@@ -954,7 +1069,7 @@
       if (!u.fromNet) {
         foes.forEach((o) => {
           const dmg = o.role === 'boss' ? r.dmgBoss : o.role === 'player' ? r.dmgPlayer : r.dmgMob;
-          deliverStrike(c, o, dmg, 68, c.f, { heavy: true, unblockable: true, ignoreParry: true, grantKi: false, cutType: r.cutType });
+          deliverStrike(c, o, dmg, 68, c.f, { heavy: true, unblockable: true, ignoreParry: true, grantKi: false, cutType: r.cutType, kb: 380 });
           KuroFX.applyEvent({ k: 'ring', x: o.x, y: o.y - 54, mr: 155, c: '#e03131', lw: 7 });
         });
       }
@@ -969,7 +1084,7 @@
     }
   }
 
-  /* ==================== FIGHTER STEP & AI ==================== */
+  /* ==================== FIGHTER STEP (BUFFERED + FRAME DATA) ==================== */
   function stepFighter(f, inp, dt) {
     if (f.dead) {
       f.deadT -= dt;
@@ -984,6 +1099,7 @@
     const prevFace = f.f;
     const W = KuroWeapons.get(f.weaponIdx);
     const swift = f.perks.has('swift') ? 1.4 : 1;
+    const b = f.buf;
 
     // Passive Ki + Idle Sheathing calm focus
     if (f.role === 'player') {
@@ -1011,6 +1127,8 @@
     if (f.invuln > 0) f.invuln -= dt;
     if (f.parryW > 0) f.parryW -= dt;
     if (f.flashT > 0) f.flashT -= dt;
+    if (f.guardRecoilT > 0) f.guardRecoilT = Math.max(0, f.guardRecoilT - dt);
+    if (f.landSquash > 0) f.landSquash = Math.max(0, f.landSquash - dt * 5.8);
     if (f.stagT > 0 && (f.stagT -= dt) <= 0) {
       f.execMark = false;
       f.pos = 0;
@@ -1027,7 +1145,13 @@
       }
     }
 
-    const busy =
+    const inAtk = f.act === 'attack' || f.act === 'airSlash';
+    const atkPrg = inAtk ? 1 - f.actT / Math.max(0.01, f.actD) : 0;
+    const cancelGate = f.activeMove && f.activeMove.cancelAt !== undefined ? f.activeMove.cancelAt : 0.55;
+    // Landing a hit allows canceling recovery early into Dash, Parry, or the next combo swing
+    const canHitCancel = inAtk && (f.didHit ? atkPrg >= cancelGate * 0.72 : atkPrg >= cancelGate);
+
+    const hardBusy =
       f.act === 'hurt' ||
       f.act === 'stagger' ||
       f.act === 'iai' ||
@@ -1036,37 +1160,46 @@
       f.act === 'skillQ' ||
       f.act === 'skillE';
 
+    const busy = hardBusy || (inAtk && !canHitCancel);
+
     // Manual Taunt / Sheathe Focus
-    if (!busy && f.role === 'player' && inp.taunt && f.ground && f.act === 'idle') {
+    if (!hardBusy && !inAtk && f.role === 'player' && b.taunt > 0 && f.ground && f.act === 'idle') {
+      b.taunt = 0;
       f.sheathed = !f.sheathed;
       if (f.sheathed) KuroFX.SFX.play('sheathe');
     }
 
     // Q / E / R Unique Weapon Skills
     if (!busy && f.role === 'player') {
-      if (inp.rSkill && f.ki >= W.skillR.cost && state === 'PLAYING') {
+      if (b.rSkill > 0 && f.ki >= W.skillR.cost && state === 'PLAYING') {
+        b.rSkill = 0;
         startUltimate(f);
         return;
       }
-      if (inp.q && f.ki >= W.skillQ.cost && f.act !== 'dash') {
+      if (b.q > 0 && f.ki >= W.skillQ.cost && f.act !== 'dash') {
+        b.q = 0;
         startSkillQ(f, inp);
-      } else if (inp.e && f.ki >= W.skillE.cost && f.act !== 'dash') {
+      } else if (b.e > 0 && f.ki >= W.skillE.cost && f.act !== 'dash') {
+        b.e = 0;
         startSkillE(f, inp);
       }
     }
 
-    // Flash-Step Dash
-    if (!busy && inp.dash && f.dashCd <= 0) {
+    // Flash-Step Dash (allowed out of neutral OR hit-cancel)
+    if (!busy && b.dash > 0 && f.dashCd <= 0) {
+      b.dash = 0;
       const dir = inp.l ? -1 : inp.r ? 1 : f.f;
       f.f = dir;
       f.sheathed = false;
       f.act = 'dash';
+      f.activeMove = null;
       f.actD = f.actT = 0.2;
       f.dashCd = W.dashCd;
       f.invuln = 0.26;
       f.vx = dir * 1120;
       f.vy = Math.min(f.vy, 0) * 0.2;
       f.guarding = false;
+      if (f.ground) KuroFX.spawnLandDust(f.x, 0.85, dir);
       emitEvent({ k: 'ring', x: f.x, y: f.y - 44, mr: 56, c: '#f2eee5', lw: 3.5, sfx: 'dash' });
       for (let i = 0; i < 5; i++) {
         KuroFX.addGhost(KuroRender.buildSkel(f.x - dir * i * 16, f.y, dir, KuroRender.POSES.dash, f.scale), f.hat, i === 0);
@@ -1076,14 +1209,29 @@
       }
     }
 
-    // Weapon Combos + Directional Up/Down Attacks + Unique Air Attacks
-    const canAtk = !busy && !(f.act === 'attack' && f.actT > f.actD * 0.4) && !(f.act === 'airSlash' && f.actT > 0.08);
-    if (inp.atk && canAtk) {
+    // Perfect Parry (allowed out of neutral OR hit-cancel on ground)
+    const canParryNow = f.ground && (!hardBusy && (f.act === 'idle' || f.act === 'run' || f.act === 'guard' || canHitCancel));
+    if (b.parry > 0 && canParryNow) {
+      b.parry = 0;
+      f.sheathed = false;
+      f.activeMove = null;
+      f.parryW = W.parry;
+      f.guarding = true;
+      f.act = 'guard';
+      f.actT = 0;
+    }
+
+    // Weapon Combos + Directional Up/Down + Unique Air Attacks (Buffered)
+    const canStartAtk = !hardBusy && f.act !== 'dash' && (!inAtk || canHitCancel);
+    if (b.atk > 0 && canStartAtk) {
+      b.atk = 0;
       if (inp.l) f.f = -1;
       else if (inp.r) f.f = 1;
       f.sheathed = false;
       f.guarding = false;
       f.hitSet.clear();
+      f.didHit = false;
+      f.lungeApplied = false;
       f.unblockable = false;
 
       if (!f.ground) {
@@ -1100,14 +1248,13 @@
           f.vx = f.f * (mv.vxBoost || 230);
         }
         checkKillAnticipation(f, mv);
-        emitEvent({ k: 'slash', x: f.x + f.f * 28, y: f.y - 52, f: f.f, r: mv.reach * 0.85, a0: mv.a0, a1: mv.a1, red: mv.red, w: mv.w, sfx: mv.sfx });
       } else {
         let mv;
-        if (inp.down && W.downAttack) {
+        if ((b.atkDown || inp.down) && W.downAttack) {
           mv = W.downAttack;
           f.moveKind = 2;
           f.step = 1;
-        } else if (inp.up && !inp.jump && W.upAttack) {
+        } else if ((b.atkUp || (inp.up && !inp.jump)) && W.upAttack) {
           mv = W.upAttack;
           f.moveKind = 1;
           f.step = 2;
@@ -1118,59 +1265,49 @@
         }
         f.act = 'attack';
         f.activeMove = mv;
-        f.comboWin = 0.66;
+        f.comboWin = 0.68;
         f.actD = f.actT = mv.dur;
-        f.vx = f.f * (mv.lunge || 250);
+        // Brief coiled setup before startup finishes; main lunge bursts on startup frame
+        f.vx *= 0.45;
         checkKillAnticipation(f, mv);
-        emitEvent({
-          k: 'slash',
-          x: f.x + f.f * 36,
-          y: f.y - (mv.lowSweep ? 24 : 52),
-          f: f.f,
-          r: mv.reach * 0.94,
-          a0: mv.a0,
-          a1: mv.a1,
-          red: mv.red,
-          w: mv.w,
-          sfx: mv.sfx,
-        });
-        KuroFX.sliceBambooAt(f.x, f.y - (mv.lowSweep ? 32 : 76), mv.reach, f.f, currentStageId());
-        if (mv.heavy && W.id === 'odachi') KuroFX.spawnBladeScrape(f.x + f.f * 50, f.f);
       }
     }
 
-    // Jump & Double Jump
-    if (!busy && inp.jump) {
-      f.sheathed = false;
+    // Jump & Double Jump (Buffered)
+    if (!busy && b.jump > 0) {
       if (f.ground || f.coyote > 0) {
+        b.jump = 0;
+        f.sheathed = false;
         f.vy = -805;
         f.ground = false;
         f.coyote = 0;
         f.jumps = 1;
-        if (f.act === 'guard') f.act = 'jump';
+        if (f.act === 'guard' || inAtk) {
+          f.act = 'jump';
+          f.activeMove = null;
+          f.actT = 0;
+        }
+        KuroFX.spawnLandDust(f.x, 0.75, 0);
         emitEvent({ k: 'ink', x: f.x, y: GROUND, dir: -f.f, n: 5, sfx: 'dash' });
       } else if (f.jumps > 0) {
+        b.jump = 0;
+        f.sheathed = false;
         f.vy = -740;
         f.jumps = 0;
         f.act = 'jump';
+        f.activeMove = null;
+        f.actT = 0;
         emitEvent({ k: 'ring', x: f.x, y: f.y - 10, mr: 46, c: '#f2eee5', lw: 3, sfx: 'dash' });
       }
     }
 
-    // Fast-fall in air when holding down
     if (!f.ground && inp.down && f.vy > -120 && f.act !== 'dash') {
       f.vy += 900 * dt;
     }
 
-    // Guard & Perfect Parry
-    const canG = f.ground && (f.act === 'idle' || f.act === 'run' || f.act === 'guard');
-    if (inp.parryTap && canG) {
-      f.sheathed = false;
-      f.parryW = W.parry;
-      f.guarding = true;
-      f.act = 'guard';
-    }
-    if (inp.guard && canG) {
+    // Guard Hold
+    const canHoldGuard = f.ground && (f.act === 'idle' || f.act === 'run' || f.act === 'guard');
+    if (inp.guard && canHoldGuard) {
       f.sheathed = false;
       f.guarding = true;
       f.act = 'guard';
@@ -1179,28 +1316,55 @@
       f.act = 'idle';
     }
 
-    // Active Action & Hitbox Resolution
+    // Active Action & Frame-Data Hitbox Resolution
     if (f.actT > 0) {
       f.actT -= dt;
       tickActiveSkills(f);
 
       if (f.act === 'attack' || f.act === 'airSlash') {
+        const mv = f.activeMove || W.combo[0];
         const prg = 1 - f.actT / Math.max(0.01, f.actD);
-        if (prg >= 0.14 && prg <= 0.72) {
-          const mv = f.activeMove || W.combo[0];
+        const stF = mv.startup !== undefined ? mv.startup : 0.18;
+        const endF = mv.activeEnd !== undefined ? mv.activeEnd : 0.58;
+
+        // Fire footwork lunge, slash SFX, smear arc, dust & bamboo slice on the exact active whip frame!
+        if (!f.lungeApplied && prg >= stF) {
+          f.lungeApplied = true;
+          if (f.act === 'attack' && mv.lunge) {
+            f.vx = f.f * mv.lunge;
+            if (f.ground) KuroFX.spawnLandDust(f.x, mv.heavy ? 0.95 : 0.55, f.f);
+          }
+          emitEvent({
+            k: 'slash',
+            x: f.x + f.f * (f.act === 'airSlash' ? 28 : 36),
+            y: f.y - (mv.lowSweep ? 24 : 52),
+            f: f.f,
+            r: (mv.reach || W.reach) * (f.act === 'airSlash' ? 0.85 : 0.94),
+            a0: mv.a0 !== undefined ? mv.a0 : -1.25,
+            a1: mv.a1 !== undefined ? mv.a1 : 1.05,
+            red: Boolean(mv.red),
+            w: mv.w || 16,
+            sfx: mv.sfx || 'swing',
+          });
+          KuroFX.sliceBambooAt(f.x, f.y - (mv.lowSweep ? 32 : 76), mv.reach || W.reach, f.f, currentStageId());
+          if (mv.heavy && W.id === 'odachi') KuroFX.spawnBladeScrape(f.x + f.f * 50, f.f);
+        }
+
+        if (prg >= stF && prg <= endF) {
           const reach = mv.reach || W.reach;
           const hx = f.x + f.f * reach * 0.56;
 
           fighters.forEach((o) => {
             if (o.team === f.team || o.dead || f.hitSet.has(o.id)) return;
             if (Math.abs(o.x - hx) <= reach * 0.62 && Math.abs(o.y - f.y) <= 95) {
-              // Simultaneous melee swing triggers Blade Clash!
-              if (
-                (o.act === 'attack' || o.act === 'airSlash') &&
-                !o.hitSet.has(f.id) &&
-                tryStartBladeClash(f, o)
-              ) {
-                return;
+              // Simultaneous active swings clash!
+              if (o.act === 'attack' || o.act === 'airSlash') {
+                const oPrg = 1 - o.actT / Math.max(0.01, o.actD);
+                const oSt = o.activeMove && o.activeMove.startup !== undefined ? o.activeMove.startup : 0.18;
+                const oEnd = o.activeMove && o.activeMove.activeEnd !== undefined ? o.activeMove.activeEnd : 0.58;
+                if (oPrg >= oSt && oPrg <= oEnd && !o.hitSet.has(f.id) && tryStartBladeClash(f, o)) {
+                  return;
+                }
               }
               f.hitSet.add(o.id);
               deliverStrike(f, o, mv.dmg || 14, mv.pos || 18, f.f, {
@@ -1210,6 +1374,8 @@
                 cutType: mv.cutType || 'waist',
                 lift: mv.lift || 0,
                 bleed: mv.bleed || 0,
+                kb: mv.kb || 0,
+                hitstop: mv.hitstop || 0,
               });
             }
           });
@@ -1222,6 +1388,7 @@
               pr.vy = 0;
               pr.f = f.f;
               pr.hits = new Set();
+              f.didHit = true;
               emitEvent({ k: 'sparks', x: pr.x, y: pr.y, dir: f.f, n: 12, sfx: 'parry' });
             }
           });
@@ -1277,23 +1444,35 @@
     f.y += f.vy * dt;
 
     if (f.y >= GROUND) {
-      if (!f.ground && f.vy > 480) {
-        emitEvent({ k: 'ink', x: f.x, y: GROUND, dir: 0, n: 5 });
-        const am = f.activeMove;
-        if (f.act === 'airSlash' && am && am.slamRadius) {
-          emitEvent({ k: 'ring', x: f.x, y: GROUND, mr: am.slamRadius, c: '#e03131', lw: 6, sfx: 'heavyHit', shake: 12 });
-          fighters.forEach((o) => {
-            if (o.team !== f.team && !o.dead && Math.abs(o.x - f.x) < am.slamRadius) {
-              deliverStrike(f, o, Math.round(am.dmg * 0.8), 30, sgn(o.x - f.x), { heavy: true, cutType: 'cleave' });
-            }
-          });
+      if (!f.ground) {
+        const impactVy = f.vy;
+        if (impactVy > 260) {
+          f.landSquash = clamp(impactVy / 820, 0.35, 1.0);
+          KuroFX.SFX.play('land');
+          KuroFX.spawnLandDust(f.x, clamp(impactVy / 700, 0.5, 1.25), 0);
+        }
+        if (impactVy > 480) {
+          emitEvent({ k: 'ink', x: f.x, y: GROUND, dir: 0, n: 5 });
+          const am = f.activeMove;
+          if (f.act === 'airSlash' && am && am.slamRadius) {
+            emitEvent({ k: 'ring', x: f.x, y: GROUND, mr: am.slamRadius, c: '#e03131', lw: 6, sfx: 'heavyHit', shake: 12 });
+            KuroFX.spawnLandDust(f.x, 1.4, 0);
+            fighters.forEach((o) => {
+              if (o.team !== f.team && !o.dead && Math.abs(o.x - f.x) < am.slamRadius) {
+                deliverStrike(f, o, Math.round(am.dmg * 0.8), 30, sgn(o.x - f.x), { heavy: true, cutType: 'cleave', kb: 320 });
+              }
+            });
+          }
         }
       }
       f.y = GROUND;
       f.vy = 0;
       f.ground = true;
       f.jumps = 2;
-      if (f.act === 'jump' || f.act === 'airSlash') f.act = Math.abs(f.vx) > 40 ? 'run' : 'idle';
+      if (f.act === 'jump' || f.act === 'airSlash') {
+        f.act = Math.abs(f.vx) > 40 ? 'run' : 'idle';
+        f.activeMove = null;
+      }
     } else {
       f.ground = false;
     }
@@ -1316,24 +1495,47 @@
       const tx = clamp(rt.x + rt.vx * extrap, LEFT_B + 42, RIGHT_B - 42);
       const ty = Math.min(GROUND, rt.y + rt.vy * extrap * 0.65);
 
+      const wasAir = f.y < GROUND - 6;
       if (Math.hypot(tx - f.x, ty - f.y) > 170) {
         f.x = tx;
         f.y = ty;
         f.scarf.reset(f.x, f.y - 78);
+        f._trail = [];
+        f._trail2 = [];
       } else {
         const k = 1 - Math.exp(-24 * dt);
         f.x = lerp(f.x, tx, k);
         f.y = lerp(f.y, ty, k);
       }
+      if (wasAir && f.y >= GROUND - 4) {
+        f.landSquash = 0.65;
+        KuroFX.spawnLandDust(f.x, 0.7, 0);
+      }
+
+      const prevAct = f.act;
+      const prevStep = f.step;
       f.vx = rt.vx;
       f.vy = rt.vy;
       f.f = rt.f;
       f.act = rt.act;
       f.step = rt.step;
       f.moveKind = rt.moveKind || 0;
+
+      // Drive 3-phase attack interpolation smoothly on remote opponent
+      if ((f.act === 'attack' || f.act === 'airSlash') && (f.act !== prevAct || f.step !== prevStep)) {
+        const mv = getMoveForRemote(f);
+        f.activeMove = mv;
+        f.actD = mv ? mv.dur : 0.26;
+        f.actT = f.actD;
+      } else if (f.actT > 0) {
+        f.actT = Math.max(0, f.actT - dt);
+      }
+
       if (f.act === 'run') f.runC += dt * (f.spd * 0.032);
     }
     if (f.flashT > 0) f.flashT -= dt;
+    if (f.guardRecoilT > 0) f.guardRecoilT = Math.max(0, f.guardRecoilT - dt);
+    if (f.landSquash > 0) f.landSquash = Math.max(0, f.landSquash - dt * 5.8);
     updatePoseAndScarf(f, dt);
   }
 
@@ -1341,22 +1543,26 @@
     const P = KuroRender.POSES;
     const baseIdle = f.sheathed ? P.sheathed : KuroRender.idlePoseFor(f.weapon);
     let tp;
+    let blendRate = 22;
 
     if (f.act === 'run') {
       tp = KuroRender.blendPose(P.runA, P.runB, (Math.sin(f.runC) + 1) * 0.5);
     } else if (f.act === 'jump') {
       tp = f.vy < 0 ? P.jump : P.fall;
-    } else if (f.act === 'attack') {
-      if (f.activeMove && f.activeMove.pose && P[f.activeMove.pose]) tp = P[f.activeMove.pose];
-      else if (f.moveKind === 2) tp = P.iai;
-      else if (f.moveKind === 1) tp = P.slash2;
-      else if (f.weapon === 'naginata' && f.step === 1) tp = P.thrust;
-      else if (f.unblockable) tp = P.slam;
-      else tp = f.step % 3 === 1 ? P.slash1 : f.step % 3 === 2 ? P.slash2 : P.slash3;
+    } else if (f.act === 'attack' || f.act === 'airSlash') {
+      const mv = f.activeMove || getMoveForRemote(f);
+      const prg = f.actD > 0 ? clamp(1 - f.actT / f.actD, 0, 1) : 0.5;
+      tp = KuroRender.evalAttackPose(mv, prg);
+      blendRate = 36;
+    } else if (f.act === 'guard') {
+      tp = f.guardRecoilT > 0 ? P.guardRecoil : P.guard;
+      blendRate = 30;
     } else if (f.act === 'skillQ') {
       tp = f.weapon === 'odachi' ? P.slam : f.weapon === 'naginata' ? P.thrust : P.slash3;
+      blendRate = 30;
     } else if (f.act === 'skillE') {
       tp = f.weapon === 'odachi' ? P.whirl : f.weapon === 'naginata' ? P.vault : P.thrust;
+      blendRate = 30;
     } else if (f.act === 'windup') {
       tp = f.role === 'gunner' ? P.aim : P.windup;
     } else if (f.act === 'taunt') {
@@ -1365,8 +1571,8 @@
       tp = P[f.act] || { ...baseIdle, py: baseIdle.py + Math.sin(tTime * 3.2 + f.id) * 1.5 };
     }
 
-    f.pose = KuroRender.blendPose(f.pose, tp, clamp(dt * 22, 0, 1));
-    const sk = KuroRender.buildSkel(f.x, f.y, f.f, f.pose, f.scale);
+    f.pose = KuroRender.blendPose(f.pose, tp, clamp(dt * blendRate, 0, 1));
+    const sk = KuroRender.buildSkel(f.x, f.y, f.f, f.pose, f.scale, f.landSquash || 0);
     const wind = currentStageId() === 'bamboo' ? -220 : -115;
     f.scarf.update(sk.nk.x, sk.nk.y, f.f, wind, dt);
     f.hpLag = lerp(f.hpLag, f.hp, clamp(dt * 7, 0, 1));
@@ -1375,6 +1581,8 @@
   /* ==================== ENEMY AI ==================== */
   function triggerEnemyStrike(e) {
     e.hitSet.clear();
+    e.didHit = false;
+    e.lungeApplied = true;
     if (e.aiKind === 'kunai') {
       e.act = 'idle';
       e.actT = 0;
@@ -1407,10 +1615,16 @@
       pos: e.unblockable ? 44 : 20,
       reach: W.reach * 0.96,
       heavy: e.unblockable,
+      startup: 0.08,
+      activeEnd: 0.62,
+      windupPose: 'windupHigh',
+      strikePose: e.unblockable ? 'slam' : e.role === 'spearman' ? 'thrust' : 'slash1',
+      followPose: e.unblockable ? 'follow3' : 'follow1',
       cutType: e.unblockable ? 'cleave' : 'waist',
     };
-    e.actD = e.actT = e.unblockable ? 0.36 : 0.25;
+    e.actD = e.actT = e.unblockable ? 0.38 : 0.27;
     e.vx = e.f * (e.role === 'spearman' ? 540 : 340);
+    KuroFX.spawnLandDust(e.x, e.unblockable ? 1.1 : 0.6, e.f);
     KuroFX.applyEvent({ k: 'slash', x: e.x + e.f * 42, y: e.y - 52, f: e.f, r: W.reach * 0.96, a0: -1.4, a1: 1.0, red: e.unblockable || e.role === 'boss', w: e.unblockable ? 26 : 18, sfx: e.unblockable ? 'heavy' : 'swing' });
     if (e.unblockable) {
       KuroFX.applyEvent({ k: 'ring', x: e.x + e.f * 75, y: GROUND, mr: 125, c: '#e03131', lw: 5, shake: 11 });
@@ -1495,7 +1709,6 @@
         KuroFX.applyEvent({ k: 'sparks', x: pr.x, y: GROUND - 2, dir: -pr.f, n: 4 });
       }
       if (!pr.visualOnly) {
-        // Moon Crescent cuts through enemy projectiles
         if (pr.k === 'wave') {
           for (const other of projs) {
             if (other !== pr && other.team !== pr.team && other.k !== 'wave' && Math.hypot(other.x - pr.x, other.y - pr.y) < pr.r + 18) {
@@ -1699,7 +1912,7 @@
         break;
       case 'hit': {
         if (!myF || myF.dead) return;
-        const [, hitId, dmg, posDmg, dir, heavy, unblockable, guardCrush, isProj, forceExec, cutType, lift, bleed] = payload;
+        const [, hitId, dmg, posDmg, dir, heavy, unblockable, guardCrush, isProj, forceExec, cutType, lift, bleed, kb, hsMs] = payload;
         const res = resolveLocalStrike(null, myF, dmg, posDmg, dir, {
           heavy: Boolean(heavy),
           unblockable: Boolean(unblockable),
@@ -1709,13 +1922,15 @@
           cutType: cutType || 'waist',
           lift: lift || 0,
           bleed: bleed || 0,
+          kb: kb || 0,
+          hitstop: (hsMs || 0) / 1000,
         });
-        KuroNet.sendReliable(['res', hitId, res.outcome, Math.round(myF.hp), Math.round(myF.pos), Math.round(myF.ki), res.broken ? 1 : 0, res.dead ? 1 : 0, res.dmg || 0]);
+        KuroNet.sendReliable(['res', hitId, res.outcome, Math.round(myF.hp), Math.round(myF.pos), Math.round(myF.ki), res.broken ? 1 : 0, res.dead ? 1 : 0, res.dmg || 0, res.counter ? 1 : 0]);
         sendMyNetState(true);
         break;
       }
       case 'res': {
-        const [, hitId, outcome, hp, pos, ki, broken, dead, dealt] = payload;
+        const [, hitId, outcome, hp, pos, ki, broken, dead, dealt, isCounter] = payload;
         const pend = netState.pendingHits.get(hitId);
         netState.pendingHits.delete(hitId);
         if (opF) {
@@ -1724,6 +1939,7 @@
           opF.ki = ki;
           if (broken) opF.execMark = true;
           if (dead) opF.severed = true;
+          if (outcome === 'guard') opF.guardRecoilT = 0.18;
         }
         if (!pend || !myF) return;
         if (outcome === 'evade') {
@@ -1738,19 +1954,25 @@
           KuroFX.applyEvent({ k: 'txt', x: myF.x, y: myF.y - 122, txt: 'PARRIED!', c: '#e03131', sc: 1.25 });
           sendMyNetState(true);
         } else if (outcome === 'guard') {
+          myF.didHit = true;
           KuroFX.applyEvent({ k: 'sparks', x: pend.fxX, y: pend.fxY, dir: -pend.dir, n: 10, sfx: 'guard', shake: 6 });
           if (broken) KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 60, txt: 'POSTURE BROKEN!', c: '#e03131', sc: 1.2 });
         } else if (outcome === 'hit' || outcome === 'exec') {
+          myF.didHit = true;
           const isEx = outcome === 'exec';
-          if (pend.grantKi) grantHit(myF, 80, isEx ? 18 : pend.heavy ? 12 : 7);
+          if (pend.grantKi) grantHit(myF, 80, (isEx ? 18 : pend.heavy ? 12 : 7) + (isCounter ? 5 : 0));
           if (isEx) {
             myF.hp = Math.min(myF.maxHp, myF.hp + 15);
             KuroFX.applyEvent({ k: 'cut', x1: pend.fxX - 135, y1: pend.fxY - 72, x2: pend.fxX + 135, y2: pend.fxY + 72, c: '#e03131', w: 16, l: 0.55, sfx: 'exec', hitstop: 0.085, inv: 0.12, slow: 0.3, zoom: 1.22, shake: 20 });
             KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 50, txt: `EXECUTION -${dealt}`, c: '#e03131', sc: 1.3 });
           } else {
-            KuroFX.applyEvent({ k: 'sparks', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: pend.heavy ? 14 : 9, redP: 0.45, sfx: pend.heavy ? 'heavyHit' : 'hit', hitstop: pend.heavy ? 0.06 : 0.04, shake: pend.heavy ? 10 : 6 });
-            KuroFX.applyEvent({ k: 'ink', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: 12, big: pend.heavy });
-            KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 34, txt: `-${dealt}`, c: pend.heavy ? '#e03131' : '#f2eee5', sc: pend.heavy ? 1.15 : 0.95 });
+            if (isCounter) {
+              KuroFX.spawnCounterBurst(pend.fxX, pend.fxY, pend.dir);
+            } else {
+              KuroFX.applyEvent({ k: 'sparks', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: pend.heavy ? 14 : 9, redP: 0.45, sfx: pend.heavy ? 'heavyHit' : 'hit', hitstop: pend.heavy ? 0.06 : 0.04, shake: pend.heavy ? 10 : 6 });
+            }
+            KuroFX.applyEvent({ k: 'ink', x: pend.fxX, y: pend.fxY, dir: pend.dir, n: 12, big: pend.heavy || Boolean(isCounter) });
+            KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 34, txt: `-${dealt}${isCounter ? '!' : ''}`, c: pend.heavy || isCounter ? '#e03131' : '#f2eee5', sc: pend.heavy || isCounter ? 1.18 : 0.95 });
           }
           if (broken) KuroFX.applyEvent({ k: 'txt', x: pend.fxX, y: pend.fxY - 70, txt: 'POSTURE BROKEN!', c: '#e03131', sc: 1.2 });
         }
@@ -1817,6 +2039,9 @@
     p1.bleedT = 0;
     p1.hp = Math.min(p1.maxHp, p1.hp + 25);
     p1.hpLag = p1.hp;
+    p1._trail = [];
+    p1._trail2 = [];
+    clearBuffer(p1);
     p1.scarf.reset(-240, GROUND - 80);
     resetArena();
 
@@ -1997,7 +2222,6 @@
       return;
     }
 
-    // Banner -> Standoff or Play
     if (state === 'BANNER') {
       tTime += rdt;
       KuroFX.update(rdt, rdt, currentStageId(), false);
@@ -2017,7 +2241,6 @@
       return;
     }
 
-    // Standoff Opening (待 -> 抜)
     if (state === 'STANDOFF') {
       tTime += rdt;
       KuroFX.update(rdt, rdt, currentStageId(), false);
@@ -2064,7 +2287,6 @@
       return;
     }
 
-    // Blade Clash (Tsubazeriai)
     if (state === 'CLASH') {
       tTime += rdt;
       clash.t -= rdt;
@@ -2106,7 +2328,6 @@
       return;
     }
 
-    // Ultimate Freeze Sequence
     if (state === 'ULT') {
       tTime += rdt;
       tickUltimate(rdt);
@@ -2117,14 +2338,19 @@
       return;
     }
 
-    // Hitstop
+    // Read & buffer human inputs BEFORE hitstop so inputs pressed during freeze-frames never drop
+    const p1Inp = KuroControls.readP1(mode);
+    const p2Inp = mode === 'local2p' ? KuroControls.readP2Local() : null;
+    const myF = getMyFighter();
+    if (myF && !myF.dead) feedBuffer(myF, p1Inp, rdt);
+    if (mode === 'local2p' && fighters[1] && !fighters[1].dead) feedBuffer(fighters[1], p2Inp, rdt);
+
     if (KuroFX.screen.hitstop > 0) {
       KuroFX.screen.hitstop = Math.max(0, KuroFX.screen.hitstop - rdt);
       KuroRender.drawFrame(buildWorldView());
       return;
     }
 
-    // Slow Motion (Kill Anticipation, Execution, Parry, Sever)
     let scale = 1;
     if (KuroFX.screen.slowT > 0) {
       KuroFX.screen.slowT = Math.max(0, KuroFX.screen.slowT - rdt);
@@ -2141,9 +2367,8 @@
 
     // Step Fighters by Mode
     if (mode === 'online') {
-      const myF = getMyFighter();
       const opF = getRemoteFighter();
-      if (myF) stepFighter(myF, KuroControls.readP1(mode), dt);
+      if (myF) stepFighter(myF, p1Inp, dt);
       if (opF) updateRemoteFighter(opF, dt);
       if (roundEndT > 0) {
         roundEndT -= rdt;
@@ -2154,8 +2379,8 @@
         }
       }
     } else if (mode === 'local2p') {
-      if (fighters[0]) stepFighter(fighters[0], KuroControls.readP1(mode), dt);
-      if (fighters[1]) stepFighter(fighters[1], KuroControls.readP2Local(), dt);
+      if (fighters[0]) stepFighter(fighters[0], p1Inp, dt);
+      if (fighters[1]) stepFighter(fighters[1], p2Inp, dt);
       const p1 = fighters[0];
       const p2 = fighters[1];
       if ((p1.dead || p2.dead) && (roundEndT += rdt) >= 1.45) {
@@ -2184,10 +2409,12 @@
         }
       }
     } else {
-      if (fighters[0]) stepFighter(fighters[0], KuroControls.readP1(mode), dt);
+      if (fighters[0]) stepFighter(fighters[0], p1Inp, dt);
       for (let i = fighters.length - 1; i >= 1; i--) {
         const e = fighters[i];
-        stepFighter(e, computeAI(e, dt), dt);
+        const aiInp = computeAI(e, dt);
+        feedBuffer(e, aiInp, dt);
+        stepFighter(e, aiInp, dt);
         if (e.dead && e.deadT <= 0) fighters.splice(i, 1);
       }
       if (fighters[0] && fighters[0].dead) {
@@ -2202,15 +2429,27 @@
     updateProjectilesAndClones(dt);
     KuroFX.update(rdt, dt, currentStageId(), false);
 
-    // Camera Tracking
+    // Dynamic Close-Duel Camera Tracking & Framing Zoom
+    let desiredZoom = KuroFX.screen.targetZoom;
     if (fighters.length >= 2) {
       const f0 = fighters[0];
       const near = fighters.slice(1).reduce((b, o) => (Math.abs(o.x - f0.x) < Math.abs(b.x - f0.x) ? o : b), fighters[1]);
       camX = lerp(camX, clamp(lerp(f0.x, near.x, mode === 'story' || mode === 'endless' ? 0.3 : 0.5), LEFT_B + 460, RIGHT_B - 460), clamp(rdt * 6.5, 0, 1));
+      if (KuroFX.screen.slowT <= 0) {
+        const is1v1 = fighters.length === 2;
+        if (is1v1) {
+          const dist = Math.abs(f0.x - near.x);
+          const tClose = clamp((540 - dist) / 350, 0, 1);
+          desiredZoom = lerp(0.98, 1.13, tClose);
+        } else {
+          desiredZoom = 1.0;
+        }
+      }
     } else if (fighters[0]) {
       camX = lerp(camX, clamp(fighters[0].x, LEFT_B + 460, RIGHT_B - 460), clamp(rdt * 6, 0, 1));
+      if (KuroFX.screen.slowT <= 0) desiredZoom = 1.02;
     }
-    camZoom = lerp(camZoom, KuroFX.screen.targetZoom, clamp(rdt * 5.5, 0, 1));
+    camZoom = lerp(camZoom, desiredZoom, clamp(rdt * 5.2, 0, 1));
 
     KuroRender.drawFrame(buildWorldView());
     emitHudCallbacks(now);
